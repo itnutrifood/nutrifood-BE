@@ -7,6 +7,7 @@ from backend.apps.categories.routers import router as categories_router
 from backend.apps.checkout.routers import router as checkout_router
 from backend.apps.cms.routers import router as cms_router
 from backend.apps.delivery.routers import router as delivery_router
+from backend.apps.faqs.routers import router as faqs_router
 from backend.apps.notifications.routers import router as notifications_router
 from backend.apps.orders.routers import router as orders_router
 from backend.apps.payments.routers import router as payments_router
@@ -31,6 +32,7 @@ router.include_router(quiz_router)
 router.include_router(support_router)
 
 localized_router.include_router(categories_router)
+localized_router.include_router(faqs_router)
 localized_router.include_router(products_router)
 localized_router.include_router(subscriptions_router)
 router.include_router(localized_router)

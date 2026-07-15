@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends
 from backend.apps.admin.auth import admin_auth
 from backend.apps.admin.auth import router as auth_router
 from backend.apps.admin.categories import router as categories_router
+from backend.apps.admin.faqs import router as faqs_router
 from backend.apps.admin.products import router as products_router
 from backend.apps.admin.subscriptions import router as subscriptions_router
 
@@ -20,6 +21,7 @@ async def read_admin_status() -> dict[str, str]:
 
 
 protected_router.include_router(categories_router)
+protected_router.include_router(faqs_router)
 protected_router.include_router(products_router)
 protected_router.include_router(subscriptions_router)
 

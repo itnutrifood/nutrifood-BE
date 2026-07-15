@@ -12,6 +12,11 @@ class CategoryStatus(StrEnum):
     INACTIVE = "inactive"
 
 
+class FAQStatus(StrEnum):
+    ACTIVE = "active"
+    INACTIVE = "inactive"
+
+
 class SubscriptionPlanStatus(StrEnum):
     ACTIVE = "active"
     INACTIVE = "inactive"
