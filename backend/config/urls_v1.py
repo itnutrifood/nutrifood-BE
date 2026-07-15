@@ -6,6 +6,7 @@ from backend.apps.cart.routers import router as cart_router
 from backend.apps.categories.routers import router as categories_router
 from backend.apps.checkout.routers import router as checkout_router
 from backend.apps.cms.routers import router as cms_router
+from backend.apps.contacts.routers import router as contacts_router
 from backend.apps.delivery.routers import router as delivery_router
 from backend.apps.faqs.routers import router as faqs_router
 from backend.apps.notifications.routers import router as notifications_router
@@ -23,6 +24,7 @@ router.include_router(accounts_router)
 router.include_router(admin_router)
 router.include_router(cart_router)
 router.include_router(checkout_router)
+router.include_router(contacts_router)
 router.include_router(cms_router)
 router.include_router(delivery_router)
 router.include_router(notifications_router)

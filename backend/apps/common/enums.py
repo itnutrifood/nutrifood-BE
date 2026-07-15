@@ -17,6 +17,11 @@ class FAQStatus(StrEnum):
     INACTIVE = "inactive"
 
 
+class ContactMessageStatus(StrEnum):
+    READ = "read"
+    UNREAD = "unread"
+
+
 class SubscriptionPlanStatus(StrEnum):
     ACTIVE = "active"
     INACTIVE = "inactive"
