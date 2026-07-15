@@ -17,6 +17,16 @@ class FAQStatus(StrEnum):
     INACTIVE = "inactive"
 
 
+class EmploymentType(StrEnum):
+    FULL_TIME = "full_time"
+    PART_TIME = "part_time"
+
+
+class OpenPositionStatus(StrEnum):
+    ACTIVE = "active"
+    INACTIVE = "inactive"
+
+
 class ContactMessageStatus(StrEnum):
     READ = "read"
     UNREAD = "unread"

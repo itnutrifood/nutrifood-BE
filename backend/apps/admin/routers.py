@@ -5,6 +5,7 @@ from backend.apps.admin.auth import router as auth_router
 from backend.apps.admin.categories import router as categories_router
 from backend.apps.admin.contact_messages import router as contact_messages_router
 from backend.apps.admin.faqs import router as faqs_router
+from backend.apps.admin.open_positions import router as open_positions_router
 from backend.apps.admin.products import router as products_router
 from backend.apps.admin.subscriptions import router as subscriptions_router
 
@@ -24,6 +25,7 @@ async def read_admin_status() -> dict[str, str]:
 protected_router.include_router(categories_router)
 protected_router.include_router(contact_messages_router)
 protected_router.include_router(faqs_router)
+protected_router.include_router(open_positions_router)
 protected_router.include_router(products_router)
 protected_router.include_router(subscriptions_router)
 
