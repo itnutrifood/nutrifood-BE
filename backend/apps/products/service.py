@@ -122,7 +122,7 @@ async def list_public_products(
     next_cursor = _product_cursor(products[-1]) if len(rows) > limit else None
 
     return CursorPage(
-        items=[_public_product(product, language) for product in products],
+        items=[to_public_product(product, language) for product in products],
         limit=limit,
         next_cursor=next_cursor,
     )
@@ -147,10 +147,10 @@ async def get_public_product(
     if row is None:
         raise PublicProductNotFoundError
 
-    return _public_product(_product_from_record(row), language)
+    return to_public_product(_product_from_record(row), language)
 
 
-def _public_product(product: ProductRead, language: LanguageCode) -> PublicProductRead:
+def to_public_product(product: ProductRead, language: LanguageCode) -> PublicProductRead:
     return PublicProductRead(
         id=product.id,
         slug=product.slug,

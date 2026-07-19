@@ -9,6 +9,7 @@ from backend.apps.cms.routers import router as cms_router
 from backend.apps.contacts.routers import router as contacts_router
 from backend.apps.delivery.routers import router as delivery_router
 from backend.apps.faqs.routers import router as faqs_router
+from backend.apps.favorites.routers import router as favorites_router
 from backend.apps.notifications.routers import router as notifications_router
 from backend.apps.open_positions.routers import router as open_positions_router
 from backend.apps.orders.routers import router as orders_router
@@ -36,6 +37,7 @@ router.include_router(support_router)
 
 localized_router.include_router(categories_router)
 localized_router.include_router(faqs_router)
+localized_router.include_router(favorites_router)
 localized_router.include_router(open_positions_router)
 localized_router.include_router(products_router)
 localized_router.include_router(subscriptions_router)

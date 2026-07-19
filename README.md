@@ -121,6 +121,13 @@ Sign in at `POST /api/v1/accounts/auth/login`:
 Clients must send the returned access token as `Authorization: Bearer <token>`.
 Refresh tokens can be exchanged at `POST /api/v1/accounts/auth/refresh`.
 
+Authenticated users can manage their favorite products with locale-scoped endpoints:
+
+- `GET /api/v1/{locale}/favorites`
+- `PUT /api/v1/{locale}/favorites` with `{"product_ids": ["<product-uuid>"]}`
+- `PUT /api/v1/{locale}/favorites/{product_id}`
+- `DELETE /api/v1/{locale}/favorites/{product_id}`
+
 ## Admin authentication
 
 Admin endpoints use local username/password authentication with JWT access and
