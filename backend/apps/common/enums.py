@@ -36,3 +36,8 @@ class SubscriptionPlanStatus(StrEnum):
     ACTIVE = "active"
     INACTIVE = "inactive"
     ARCHIVED = "archived"
+
+
+class TestimonialStatus(StrEnum):
+    ACTIVE = "active"
+    INACTIVE = "inactive"

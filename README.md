@@ -20,6 +20,7 @@ Useful endpoints:
 - `GET /api/v1/en-us/categories`
 - `GET /api/v1/hy-am/products`
 - `GET /api/v1/ru-ru/subscriptions`
+- `GET /api/v1/testimonials`
 - `GET /docs`
 
 ## API versions and locales
@@ -52,7 +53,7 @@ Show migration status:
 make migrate-status
 ```
 
-Seed admin and organic fitness catalog data:
+Seed admin, organic fitness catalog data, and five testimonials:
 
 ```sh
 make seed
@@ -127,6 +128,9 @@ Authenticated users can manage their favorite products with locale-scoped endpoi
 - `PUT /api/v1/{locale}/favorites` with `{"product_ids": ["<product-uuid>"]}`
 - `PUT /api/v1/{locale}/favorites/{product_id}`
 - `DELETE /api/v1/{locale}/favorites/{product_id}`
+
+Testimonials are managed through `/api/v1/admin/testimonials`. Active testimonials are
+available publicly from `GET /api/v1/testimonials` and `GET /api/v1/testimonials/{id}`.
 
 ## Admin authentication
 

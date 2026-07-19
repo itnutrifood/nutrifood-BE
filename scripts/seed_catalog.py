@@ -345,6 +345,74 @@ SUBSCRIPTION_PLANS: list[dict[str, Any]] = [
     },
 ]
 
+TESTIMONIALS: list[dict[str, Any]] = [
+    {
+        "id": UUID("80000000-0000-0000-0000-000000000001"),
+        "first_name": "Anna",
+        "last_name": "Sargsyan",
+        "author_title": "Working Mom",
+        "photo_url": "https://cdn.nutrifood.local/testimonials/anna-sargsyan.jpg",
+        "review": (
+            "NutriFood takes the stress out of planning healthy family meals. "
+            "Everything arrives fresh, and I get valuable time back during busy weekdays."
+        ),
+        "rating": 5,
+        "sort_order": 10,
+    },
+    {
+        "id": UUID("80000000-0000-0000-0000-000000000002"),
+        "first_name": "David",
+        "last_name": "Petrosyan",
+        "author_title": "Fitness Enthusiast",
+        "photo_url": "https://cdn.nutrifood.local/testimonials/david-petrosyan.jpg",
+        "review": (
+            "The high-protein meals fit my training routine perfectly. Portions are balanced, "
+            "the ingredients taste fresh, and tracking my nutrition is much easier."
+        ),
+        "rating": 5,
+        "sort_order": 20,
+    },
+    {
+        "id": UUID("80000000-0000-0000-0000-000000000003"),
+        "first_name": "Mariam",
+        "last_name": "Hakobyan",
+        "author_title": "Product Designer",
+        "photo_url": None,
+        "review": (
+            "I can order nourishing lunches without interrupting a packed workday. "
+            "The menu has enough variety to keep every week interesting."
+        ),
+        "rating": 4,
+        "sort_order": 30,
+    },
+    {
+        "id": UUID("80000000-0000-0000-0000-000000000004"),
+        "first_name": "Arman",
+        "last_name": "Grigoryan",
+        "author_title": "Business Owner",
+        "photo_url": "https://cdn.nutrifood.local/testimonials/arman-grigoryan.jpg",
+        "review": (
+            "Reliable delivery and consistently good food make NutriFood an easy choice. "
+            "It helps me eat well even when meetings fill the entire day."
+        ),
+        "rating": 5,
+        "sort_order": 40,
+    },
+    {
+        "id": UUID("80000000-0000-0000-0000-000000000005"),
+        "first_name": "Lilit",
+        "last_name": "Avetisyan",
+        "author_title": "Yoga Instructor",
+        "photo_url": "https://cdn.nutrifood.local/testimonials/lilit-avetisyan.jpg",
+        "review": (
+            "The plant-based options are colorful, satisfying, and thoughtfully prepared. "
+            "I feel energized after every meal without spending hours in the kitchen."
+        ),
+        "rating": 5,
+        "sort_order": 50,
+    },
+]
+
 
 async def seed_categories(connection: asyncpg.Connection) -> dict[str, UUID]:
     category_ids: dict[str, UUID] = {}
@@ -507,6 +575,44 @@ async def seed_subscription_plans(connection: asyncpg.Connection) -> None:
         )
 
 
+async def seed_testimonials(connection: asyncpg.Connection) -> None:
+    for testimonial in TESTIMONIALS:
+        await connection.execute(
+            """
+            INSERT INTO testimonials (
+                id,
+                first_name,
+                last_name,
+                author_title,
+                photo_url,
+                review,
+                rating,
+                status,
+                sort_order
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', $8)
+            ON CONFLICT (id) DO UPDATE
+            SET first_name = EXCLUDED.first_name,
+                last_name = EXCLUDED.last_name,
+                author_title = EXCLUDED.author_title,
+                photo_url = EXCLUDED.photo_url,
+                review = EXCLUDED.review,
+                rating = EXCLUDED.rating,
+                status = EXCLUDED.status,
+                sort_order = EXCLUDED.sort_order,
+                updated_at = now()
+            """,
+            testimonial["id"],
+            testimonial["first_name"],
+            testimonial["last_name"],
+            testimonial["author_title"],
+            testimonial["photo_url"],
+            testimonial["review"],
+            testimonial["rating"],
+            testimonial["sort_order"],
+        )
+
+
 async def seed_catalog() -> None:
     load_dotenv()
     get_settings.cache_clear()
@@ -519,6 +625,7 @@ async def seed_catalog() -> None:
                 category_ids = await seed_categories(connection)
                 await seed_products(connection, category_ids)
                 await seed_subscription_plans(connection)
+                await seed_testimonials(connection)
     finally:
         await pool.close()
 
@@ -526,7 +633,8 @@ async def seed_catalog() -> None:
         "Seeded catalog: "
         f"{len(CATEGORIES)} categories, "
         f"{len(PRODUCTS)} products, "
-        f"{len(SUBSCRIPTION_PLANS)} subscription plans"
+        f"{len(SUBSCRIPTION_PLANS)} subscription plans, "
+        f"{len(TESTIMONIALS)} testimonials"
     )
 
 

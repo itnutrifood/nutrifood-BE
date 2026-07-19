@@ -18,6 +18,7 @@ from backend.apps.products.routers import router as products_router
 from backend.apps.quiz.routers import router as quiz_router
 from backend.apps.subscriptions.routers import router as subscriptions_router
 from backend.apps.support.routers import router as support_router
+from backend.apps.testimonials.routers import router as testimonials_router
 
 router = APIRouter()
 localized_router = APIRouter(prefix="/{locale}")
@@ -34,6 +35,7 @@ router.include_router(orders_router)
 router.include_router(payments_router)
 router.include_router(quiz_router)
 router.include_router(support_router)
+router.include_router(testimonials_router)
 
 localized_router.include_router(categories_router)
 localized_router.include_router(faqs_router)

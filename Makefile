@@ -15,7 +15,7 @@ help:
 	@printf "  make migrate-status   Show Goose migration status\n"
 	@printf "  make migration name=x Create a SQL migration\n"
 	@printf "  make seed-admin       Seed or update the admin user from .env\n"
-	@printf "  make seed-catalog     Seed categories, products, and subscription plans\n"
+	@printf "  make seed-catalog     Seed catalog content and testimonials\n"
 	@printf "  make seed             Seed admin and catalog data\n"
 	@printf "  make lint             Run Ruff and mypy\n"
 	@printf "  make format           Format code with Ruff\n"

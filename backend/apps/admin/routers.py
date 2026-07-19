@@ -8,6 +8,7 @@ from backend.apps.admin.faqs import router as faqs_router
 from backend.apps.admin.open_positions import router as open_positions_router
 from backend.apps.admin.products import router as products_router
 from backend.apps.admin.subscriptions import router as subscriptions_router
+from backend.apps.admin.testimonials import router as testimonials_router
 
 router = APIRouter()
 protected_router = APIRouter(
@@ -28,6 +29,7 @@ protected_router.include_router(faqs_router)
 protected_router.include_router(open_positions_router)
 protected_router.include_router(products_router)
 protected_router.include_router(subscriptions_router)
+protected_router.include_router(testimonials_router)
 
 router.include_router(auth_router, prefix="/admin")
 router.include_router(protected_router)
