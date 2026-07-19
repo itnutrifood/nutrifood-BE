@@ -1,0 +1,76 @@
+name: Deploy Backend to Production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nutrifood-backend-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to production server
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: prod
+
+    env:
+      DEPLOY_HOST: ${{ secrets.HOST }}
+      DEPLOY_USERNAME: ${{ secrets.USERNAME }}
+      DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+      DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+      DEPLOY_PROJECT_PATH: ${{ secrets.PROJECT_PATH }}
+      DEPLOY_REPO_SSH_KEY_PATH: ${{ secrets.REPO_SSH_KEY_PATH }}
+
+    steps:
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -d -m 0700 "$RUNNER_TEMP/nutrifood-ssh"
+          printf '%s\n' "$DEPLOY_SSH_PRIVATE_KEY" | tr -d '\r' \
+            > "$RUNNER_TEMP/nutrifood-ssh/id_ed25519"
+          printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" \
+            > "$RUNNER_TEMP/nutrifood-ssh/known_hosts"
+          chmod 0600 "$RUNNER_TEMP/nutrifood-ssh/id_ed25519"
+          chmod 0644 "$RUNNER_TEMP/nutrifood-ssh/known_hosts"
+
+      - name: Pull, migrate, and restart
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh \
+            -i "$RUNNER_TEMP/nutrifood-ssh/id_ed25519" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o "UserKnownHostsFile=$RUNNER_TEMP/nutrifood-ssh/known_hosts" \
+            -o StrictHostKeyChecking=yes \
+            "$DEPLOY_USERNAME@$DEPLOY_HOST" \
+            bash -s -- \
+              "$DEPLOY_PROJECT_PATH" \
+              "$DEPLOY_REPO_SSH_KEY_PATH" <<'REMOTE_SCRIPT'
+          set -Eeuo pipefail
+
+          project_path=$1
+          repo_ssh_key_path=$2
+
+          cd "$project_path"
+          export GIT_SSH_COMMAND="ssh -i $repo_ssh_key_path -o BatchMode=yes -o IdentitiesOnly=yes"
+
+          git fetch origin main
+          git checkout main || git checkout --track -b main origin/main
+          git pull --ff-only origin main
+
+          set -a
+          . ./.env
+          set +a
+          /usr/local/bin/goose -dir migrations up
+
+          supervisorctl restart nutrifood
+          supervisorctl status nutrifood
+          REMOTE_SCRIPT
