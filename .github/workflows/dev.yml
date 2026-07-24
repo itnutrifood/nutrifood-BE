@@ -66,7 +66,14 @@ jobs:
           git checkout dev || git checkout --track -b dev origin/dev
           git pull --ff-only origin dev
 
-          poetry install --only main --no-root --no-interaction --no-ansi
+          poetry_bin="$project_path/.poetry-venv/bin/poetry"
+          if [ ! -x "$poetry_bin" ]; then
+            python3 -m venv "$project_path/.poetry-venv"
+            "$project_path/.poetry-venv/bin/python" -m pip install \
+              --disable-pip-version-check \
+              "poetry==2.3.4"
+          fi
+          "$poetry_bin" install --only main --no-root --no-interaction --no-ansi
 
           set -a
           . ./.env
