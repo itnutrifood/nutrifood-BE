@@ -40,7 +40,7 @@ jobs:
           chmod 0600 "$RUNNER_TEMP/nutrifood-ssh/id_ed25519"
           chmod 0644 "$RUNNER_TEMP/nutrifood-ssh/known_hosts"
 
-      - name: Pull, migrate, and restart
+      - name: Pull, install, migrate, and restart
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -65,6 +65,8 @@ jobs:
           git fetch origin dev
           git checkout dev || git checkout --track -b dev origin/dev
           git pull --ff-only origin dev
+
+          poetry install --only main --no-root --no-interaction --no-ansi
 
           set -a
           . ./.env
