@@ -129,6 +129,23 @@ Authenticated users can manage their favorite products with locale-scoped endpoi
 - `PUT /api/v1/{locale}/favorites/{product_id}`
 - `DELETE /api/v1/{locale}/favorites/{product_id}`
 
+## Cart
+
+Guests can keep cart items locally and sync them after authentication, in the same way
+as offline favorites. Cart quantities are set rather than incremented, so retrying a
+request is safe:
+
+- `GET /api/v1/{locale}/cart`
+- `PUT /api/v1/{locale}/cart/{product_id}` with `{"quantity": 2}`
+- `PUT /api/v1/{locale}/cart` with
+  `{"items": [{"product_id": "<product-uuid>", "quantity": 2}]}`
+- `DELETE /api/v1/{locale}/cart/{product_id}`
+- `DELETE /api/v1/{locale}/cart`
+
+The bulk `PUT` is intended for syncing a locally stored guest cart after login. It
+upserts all supplied quantities atomically and leaves other existing cart items in
+place. Server-side cart endpoints require an access token.
+
 Testimonials are managed through `/api/v1/admin/testimonials`. Active testimonials are
 available publicly from `GET /api/v1/testimonials` and `GET /api/v1/testimonials/{id}`.
 
