@@ -26,6 +26,7 @@ jobs:
       DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
       DEPLOY_PROJECT_PATH: ${{ secrets.PROJECT_PATH }}
       DEPLOY_REPO_SSH_KEY_PATH: ${{ secrets.REPO_SSH_KEY_PATH }}
+      DEPLOY_VENV_PATH: ${{ secrets.VENV_PATH }}
 
     steps:
       - name: Configure SSH
@@ -53,11 +54,17 @@ jobs:
             "$DEPLOY_USERNAME@$DEPLOY_HOST" \
             bash -s -- \
               "$DEPLOY_PROJECT_PATH" \
-              "$DEPLOY_REPO_SSH_KEY_PATH" <<'REMOTE_SCRIPT'
+              "$DEPLOY_REPO_SSH_KEY_PATH" \
+              "${DEPLOY_VENV_PATH:-__AUTO__}" <<'REMOTE_SCRIPT'
           set -Eeuo pipefail
 
           project_path=$1
           repo_ssh_key_path=$2
+          venv_path=$3
+
+          if [ "$venv_path" = "__AUTO__" ]; then
+            venv_path="$(dirname "$project_path")/venv"
+          fi
 
           cd "$project_path"
           export GIT_SSH_COMMAND="ssh -i $repo_ssh_key_path -o BatchMode=yes -o IdentitiesOnly=yes"
@@ -73,7 +80,17 @@ jobs:
               --disable-pip-version-check \
               "poetry==2.3.4"
           fi
-          "$poetry_bin" install --only main --no-root --no-interaction --no-ansi
+
+          if [ ! -x "$venv_path/bin/python" ]; then
+            printf 'Application virtual environment not found: %s\n' "$venv_path" >&2
+            exit 1
+          fi
+
+          VIRTUAL_ENV="$venv_path" \
+            PATH="$venv_path/bin:$PATH" \
+            POETRY_VIRTUALENVS_CREATE=false \
+            "$poetry_bin" install --only main --no-root --no-interaction --no-ansi
+          "$venv_path/bin/python" -c 'import fastapi, firebase_admin, uvicorn'
 
           set -a
           . ./.env
