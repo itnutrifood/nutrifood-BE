@@ -1,0 +1,2 @@
+class FcmRegistrationNotFoundError(Exception):
+    pass

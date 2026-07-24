@@ -1,28 +1,24 @@
-from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import cast
 from uuid import UUID
 
 import asyncpg
 
-from backend.apps.admin.categories import CATEGORY_COLUMNS, CategoryRead, _category_from_record
-from backend.apps.categories.schemas import PublicCategoryRead
-from backend.apps.common.enums import CategoryStatus, LanguageCode
+from backend.apps.categories import repository
+from backend.apps.categories.exceptions import (
+    CategoryFilterConflictError,
+    CategoryNotFoundError,
+)
+from backend.apps.categories.schemas import CategoryRead, PublicCategoryRead
+from backend.apps.common.enums import LanguageCode
+from backend.apps.common.exceptions import InvalidCursorError
 from backend.apps.common.localization import localized_text, required_localized_text
 from backend.apps.common.pagination import (
     CursorPage,
-    InvalidCursorError,
     decode_cursor,
     encode_cursor,
 )
 
-
-class PublicCategoryNotFoundError(Exception):
-    pass
-
-
-class CategoryFilterConflictError(ValueError):
-    pass
+PublicCategoryNotFoundError = CategoryNotFoundError
 
 
 @dataclass(frozen=True)
@@ -75,42 +71,23 @@ async def list_public_categories(
     if root_only and parent_id is not None:
         raise CategoryFilterConflictError("root_only and parent_id cannot be used together")
 
-    params: list[object] = [CategoryStatus.ACTIVE.value]
-    conditions = ["status = $1::category_status"]
-
-    if root_only:
-        conditions.append("parent_id IS NULL")
-    elif parent_id is not None:
-        params.append(parent_id)
-        conditions.append(f"parent_id = ${len(params)}")
-
+    parsed_cursor: CategoryCursor | None = None
     if cursor is not None:
-        category_cursor = _parse_category_cursor(cursor)
-        params.extend([category_cursor.sort_order, category_cursor.slug, category_cursor.id])
-        conditions.append(
-            f"(sort_order, slug, id) > (${len(params) - 2}, ${len(params) - 1}, ${len(params)})"
-        )
+        parsed_cursor = _parse_category_cursor(cursor)
 
-    params.append(limit + 1)
-    rows = cast(
-        Sequence[Mapping[str, object]],
-        await pool.fetch(
-            f"""
-            SELECT {CATEGORY_COLUMNS}
-            FROM categories
-            WHERE {" AND ".join(conditions)}
-            ORDER BY sort_order, slug, id
-            LIMIT ${len(params)}
-            """,
-            *params,
-        ),
+    categories = await repository.list_active_categories(
+        pool,
+        parent_id,
+        root_only,
+        limit,
+        (parsed_cursor.sort_order, parsed_cursor.slug, parsed_cursor.id)
+        if parsed_cursor is not None
+        else None,
     )
-
-    categories = [_category_from_record(row) for row in rows[:limit]]
-    next_cursor = _category_cursor(categories[-1]) if len(rows) > limit else None
+    next_cursor = _category_cursor(categories[limit - 1]) if len(categories) > limit else None
 
     return CursorPage(
-        items=[_public_category(category, language) for category in categories],
+        items=[_public_category(category, language) for category in categories[:limit]],
         limit=limit,
         next_cursor=next_cursor,
     )
@@ -121,23 +98,8 @@ async def get_public_category(
     language: LanguageCode,
     category_id: UUID,
 ) -> PublicCategoryRead:
-    row = cast(
-        Mapping[str, object] | None,
-        await pool.fetchrow(
-            f"""
-            SELECT {CATEGORY_COLUMNS}
-            FROM categories
-            WHERE id = $1
-                AND status = $2::category_status
-            """,
-            category_id,
-            CategoryStatus.ACTIVE.value,
-        ),
-    )
-    if row is None:
-        raise PublicCategoryNotFoundError
-
-    return _public_category(_category_from_record(row), language)
+    category = await repository.get_active_category(pool, category_id)
+    return _public_category(category, language)
 
 
 def _public_category(category: CategoryRead, language: LanguageCode) -> PublicCategoryRead:

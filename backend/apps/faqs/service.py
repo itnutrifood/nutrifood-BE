@@ -1,24 +1,21 @@
-from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import cast
 from uuid import UUID
 
 import asyncpg
 
-from backend.apps.admin.faqs import FAQ_COLUMNS, FAQRead, _faq_from_record
-from backend.apps.common.enums import FAQStatus, LanguageCode
+from backend.apps.common.enums import LanguageCode
+from backend.apps.common.exceptions import InvalidCursorError
 from backend.apps.common.localization import required_localized_text
 from backend.apps.common.pagination import (
     CursorPage,
-    InvalidCursorError,
     decode_cursor,
     encode_cursor,
 )
-from backend.apps.faqs.schemas import PublicFAQRead
+from backend.apps.faqs import repository
+from backend.apps.faqs.exceptions import FAQNotFoundError
+from backend.apps.faqs.schemas import FAQRead, PublicFAQRead
 
-
-class PublicFAQNotFoundError(Exception):
-    pass
+PublicFAQNotFoundError = FAQNotFoundError
 
 
 @dataclass(frozen=True)
@@ -59,34 +56,20 @@ async def list_public_faqs(
     limit: int,
     cursor: str | None,
 ) -> CursorPage[PublicFAQRead]:
-    params: list[object] = [FAQStatus.ACTIVE.value]
-    conditions = ["status = $1::faq_status"]
-
+    parsed_cursor: FAQCursor | None = None
     if cursor is not None:
-        faq_cursor = _parse_faq_cursor(cursor)
-        params.extend([faq_cursor.sort_order, faq_cursor.slug, faq_cursor.id])
-        conditions.append(
-            f"(sort_order, slug, id) > (${len(params) - 2}, ${len(params) - 1}, ${len(params)})"
-        )
+        parsed_cursor = _parse_faq_cursor(cursor)
 
-    params.append(limit + 1)
-    rows = cast(
-        Sequence[Mapping[str, object]],
-        await pool.fetch(
-            f"""
-            SELECT {FAQ_COLUMNS}
-            FROM faqs
-            WHERE {" AND ".join(conditions)}
-            ORDER BY sort_order, slug, id
-            LIMIT ${len(params)}
-            """,
-            *params,
-        ),
+    faqs = await repository.list_active_faqs(
+        pool,
+        limit,
+        (parsed_cursor.sort_order, parsed_cursor.slug, parsed_cursor.id)
+        if parsed_cursor is not None
+        else None,
     )
-    faqs = [_faq_from_record(row) for row in rows[:limit]]
-    next_cursor = _faq_cursor(faqs[-1]) if len(rows) > limit else None
+    next_cursor = _faq_cursor(faqs[limit - 1]) if len(faqs) > limit else None
     return CursorPage(
-        items=[_public_faq(faq, language) for faq in faqs],
+        items=[_public_faq(faq, language) for faq in faqs[:limit]],
         limit=limit,
         next_cursor=next_cursor,
     )
@@ -97,23 +80,8 @@ async def get_public_faq(
     language: LanguageCode,
     faq_id: UUID,
 ) -> PublicFAQRead:
-    row = cast(
-        Mapping[str, object] | None,
-        await pool.fetchrow(
-            f"""
-            SELECT {FAQ_COLUMNS}
-            FROM faqs
-            WHERE id = $1
-                AND status = $2::faq_status
-            """,
-            faq_id,
-            FAQStatus.ACTIVE.value,
-        ),
-    )
-    if row is None:
-        raise PublicFAQNotFoundError
-
-    return _public_faq(_faq_from_record(row), language)
+    faq = await repository.get_active_faq(pool, faq_id)
+    return _public_faq(faq, language)
 
 
 def _public_faq(faq: FAQRead, language: LanguageCode) -> PublicFAQRead:

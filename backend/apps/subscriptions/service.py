@@ -1,17 +1,11 @@
-from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
-from typing import cast
 from uuid import UUID
 
 import asyncpg
 
-from backend.apps.admin.subscriptions import (
-    SUBSCRIPTION_PLAN_COLUMNS,
-    SubscriptionPlanRead,
-    _subscription_plan_from_record,
-)
-from backend.apps.common.enums import LanguageCode, SubscriptionPlanStatus
+from backend.apps.common.enums import LanguageCode
+from backend.apps.common.exceptions import InvalidCursorError
 from backend.apps.common.localization import (
     localized_items,
     localized_text,
@@ -19,15 +13,14 @@ from backend.apps.common.localization import (
 )
 from backend.apps.common.pagination import (
     CursorPage,
-    InvalidCursorError,
     decode_cursor,
     encode_cursor,
 )
-from backend.apps.subscriptions.schemas import PublicSubscriptionPlanRead
+from backend.apps.subscriptions import repository
+from backend.apps.subscriptions.exceptions import SubscriptionPlanNotFoundError
+from backend.apps.subscriptions.schemas import PublicSubscriptionPlanRead, SubscriptionPlanRead
 
-
-class PublicSubscriptionPlanNotFoundError(Exception):
-    pass
+PublicSubscriptionPlanNotFoundError = SubscriptionPlanNotFoundError
 
 
 @dataclass(frozen=True)
@@ -87,52 +80,33 @@ async def list_public_subscription_plans(
     limit: int,
     cursor: str | None,
 ) -> CursorPage[PublicSubscriptionPlanRead]:
-    params: list[object] = [SubscriptionPlanStatus.ACTIVE.value]
-    conditions = ["status = $1::subscription_plan_status"]
-
-    if is_popular is not None:
-        params.append(is_popular)
-        conditions.append(f"is_popular = ${len(params)}")
-
+    parsed_cursor: SubscriptionPlanCursor | None = None
     if cursor is not None:
-        subscription_cursor = _parse_subscription_plan_cursor(cursor)
-        params.extend(
-            [
-                subscription_cursor.sort_order,
-                subscription_cursor.price,
-                subscription_cursor.slug,
-                subscription_cursor.id,
-            ]
-        )
-        conditions.append(
-            f"""
-            (sort_order, price, slug, id) >
-            (${len(params) - 3}, ${len(params) - 2}, ${len(params) - 1}, ${len(params)})
-            """
-        )
+        parsed_cursor = _parse_subscription_plan_cursor(cursor)
 
-    params.append(limit + 1)
-    rows = cast(
-        Sequence[Mapping[str, object]],
-        await pool.fetch(
-            f"""
-            SELECT {SUBSCRIPTION_PLAN_COLUMNS}
-            FROM subscription_plans
-            WHERE {" AND ".join(conditions)}
-            ORDER BY sort_order, price, slug, id
-            LIMIT ${len(params)}
-            """,
-            *params,
-        ),
+    subscription_plans = await repository.list_active_subscription_plans(
+        pool,
+        is_popular,
+        limit,
+        (
+            parsed_cursor.sort_order,
+            parsed_cursor.price,
+            parsed_cursor.slug,
+            parsed_cursor.id,
+        )
+        if parsed_cursor is not None
+        else None,
     )
-
-    subscription_plans = [_subscription_plan_from_record(row) for row in rows[:limit]]
-    next_cursor = _subscription_plan_cursor(subscription_plans[-1]) if len(rows) > limit else None
+    next_cursor = (
+        _subscription_plan_cursor(subscription_plans[limit - 1])
+        if len(subscription_plans) > limit
+        else None
+    )
 
     return CursorPage(
         items=[
             _public_subscription_plan(subscription_plan, language)
-            for subscription_plan in subscription_plans
+            for subscription_plan in subscription_plans[:limit]
         ],
         limit=limit,
         next_cursor=next_cursor,
@@ -144,23 +118,11 @@ async def get_public_subscription_plan(
     language: LanguageCode,
     subscription_plan_id: UUID,
 ) -> PublicSubscriptionPlanRead:
-    row = cast(
-        Mapping[str, object] | None,
-        await pool.fetchrow(
-            f"""
-            SELECT {SUBSCRIPTION_PLAN_COLUMNS}
-            FROM subscription_plans
-            WHERE id = $1
-                AND status = $2::subscription_plan_status
-            """,
-            subscription_plan_id,
-            SubscriptionPlanStatus.ACTIVE.value,
-        ),
+    subscription_plan = await repository.get_active_subscription_plan(
+        pool,
+        subscription_plan_id,
     )
-    if row is None:
-        raise PublicSubscriptionPlanNotFoundError
-
-    return _public_subscription_plan(_subscription_plan_from_record(row), language)
+    return _public_subscription_plan(subscription_plan, language)
 
 
 def _public_subscription_plan(

@@ -1,13 +1,11 @@
-from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import cast
 from uuid import UUID
 
 import asyncpg
 
-from backend.apps.admin.products import PRODUCT_COLUMNS, ProductRead, _product_from_record
-from backend.apps.common.enums import CategoryStatus, LanguageCode
+from backend.apps.common.enums import LanguageCode
+from backend.apps.common.exceptions import InvalidCursorError
 from backend.apps.common.localization import (
     localized_items,
     localized_text,
@@ -15,15 +13,14 @@ from backend.apps.common.localization import (
 )
 from backend.apps.common.pagination import (
     CursorPage,
-    InvalidCursorError,
     decode_cursor,
     encode_cursor,
 )
-from backend.apps.products.schemas import PublicProductRead
+from backend.apps.products import repository
+from backend.apps.products.exceptions import ProductNotFoundError
+from backend.apps.products.schemas import ProductRead, PublicProductRead
 
-
-class PublicProductNotFoundError(Exception):
-    pass
+PublicProductNotFoundError = ProductNotFoundError
 
 
 @dataclass(frozen=True)
@@ -66,63 +63,20 @@ async def list_public_products(
     limit: int,
     cursor: str | None,
 ) -> CursorPage[PublicProductRead]:
-    params: list[object] = []
-    conditions: list[str] = []
-
-    if category_id is not None:
-        params.append(category_id)
-        category_id_param = len(params)
-        params.append(CategoryStatus.ACTIVE.value)
-        status_param = len(params)
-        conditions.append(
-            f"""
-            EXISTS (
-                SELECT 1
-                FROM product_categories AS pc
-                INNER JOIN categories AS c ON c.id = pc.category_id
-                WHERE pc.product_id = p.id
-                    AND pc.category_id = ${category_id_param}
-                    AND c.status = ${status_param}::category_status
-            )
-            """
-        )
-
+    parsed_cursor: ProductCursor | None = None
     if cursor is not None:
-        product_cursor = _parse_product_cursor(cursor)
-        params.extend([product_cursor.created_at, product_cursor.id])
-        created_at_param = len(params) - 1
-        id_param = len(params)
-        conditions.append(
-            f"""
-            (
-                p.created_at < ${created_at_param}
-                OR (p.created_at = ${created_at_param} AND p.id > ${id_param})
-            )
-            """
-        )
+        parsed_cursor = _parse_product_cursor(cursor)
 
-    where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-
-    params.append(limit + 1)
-    rows = cast(
-        Sequence[Mapping[str, object]],
-        await pool.fetch(
-            f"""
-            SELECT {PRODUCT_COLUMNS}
-            FROM products AS p
-            {where_clause}
-            ORDER BY p.created_at DESC, p.id
-            LIMIT ${len(params)}
-            """,
-            *params,
-        ),
+    products = await repository.list_public_products(
+        pool,
+        category_id,
+        limit,
+        (parsed_cursor.created_at, parsed_cursor.id) if parsed_cursor is not None else None,
     )
-
-    products = [_product_from_record(row) for row in rows[:limit]]
-    next_cursor = _product_cursor(products[-1]) if len(rows) > limit else None
+    next_cursor = _product_cursor(products[limit - 1]) if len(products) > limit else None
 
     return CursorPage(
-        items=[to_public_product(product, language) for product in products],
+        items=[to_public_product(product, language) for product in products[:limit]],
         limit=limit,
         next_cursor=next_cursor,
     )
@@ -133,21 +87,8 @@ async def get_public_product(
     language: LanguageCode,
     product_id: UUID,
 ) -> PublicProductRead:
-    row = cast(
-        Mapping[str, object] | None,
-        await pool.fetchrow(
-            f"""
-            SELECT {PRODUCT_COLUMNS}
-            FROM products AS p
-            WHERE p.id = $1
-            """,
-            product_id,
-        ),
-    )
-    if row is None:
-        raise PublicProductNotFoundError
-
-    return to_public_product(_product_from_record(row), language)
+    product = await repository.get_public_product(pool, product_id)
+    return to_public_product(product, language)
 
 
 def to_public_product(product: ProductRead, language: LanguageCode) -> PublicProductRead:

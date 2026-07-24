@@ -1,0 +1,2 @@
+class OpenPositionNotFoundError(Exception):
+    pass

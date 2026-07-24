@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints
 
 from backend.apps.common.enums import ContactMessageStatus
+from backend.apps.common.pagination import Page
 
 Name = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=150)]
 Subject = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]
@@ -29,3 +30,13 @@ class ContactMessageRead(BaseModel):
     status: ContactMessageStatus
     created_at: datetime
     updated_at: datetime
+
+
+class ContactMessageListResponse(Page[ContactMessageRead]):
+    pass
+
+
+class ContactMessageStatusUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: ContactMessageStatus

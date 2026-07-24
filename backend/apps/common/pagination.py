@@ -9,6 +9,8 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
+from backend.apps.common.exceptions import InvalidCursorError as InvalidCursorError
+
 
 class CursorPage[T](BaseModel):
     items: list[T]
@@ -22,10 +24,6 @@ class Page[T](BaseModel):
     page: int
     limit: int
     total_pages: int
-
-
-class InvalidCursorError(ValueError):
-    pass
 
 
 def page_offset(page: int, limit: int) -> int:

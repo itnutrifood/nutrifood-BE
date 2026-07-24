@@ -1,0 +1,2 @@
+class ContactMessageNotFoundError(Exception):
+    pass

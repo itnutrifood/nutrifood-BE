@@ -1,9 +1,9 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import TypedDict, cast
+from typing import Annotated, TypedDict, cast
 
 import asyncpg
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 
 from backend.config.firebase import FirebaseService, create_firebase_service
 from backend.config.settings import get_settings
@@ -38,3 +38,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def get_pool(request: Request) -> asyncpg.Pool:
     return cast(asyncpg.Pool, request.app.state.db_pool)
+
+
+DbPool = Annotated[asyncpg.Pool, Depends(get_pool)]

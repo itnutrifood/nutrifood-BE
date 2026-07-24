@@ -30,6 +30,23 @@ Versioned routers are assembled under `backend/config/urls_v1.py` and
 `/api/v1` and `/api/v2`. Add new v2 endpoints by importing and including their
 routers in `backend/config/urls_v2.py`.
 
+## Application boundaries
+
+Feature modules keep HTTP, application, and persistence concerns separate:
+
+- `schemas.py` contains Pydantic request and response contracts.
+- `models.py` contains internal records or dataclasses when a feature needs them.
+- `exceptions.py` contains domain and application exceptions.
+- `repository.py` contains SQL, `asyncpg` calls, and database-record mapping.
+- `service.py` and `admin_service.py` contain business and orchestration logic.
+- `routers.py` and `admin_routers.py` contain only FastAPI route declarations,
+  dependencies, and service calls.
+
+Admin catalog routes are owned by their feature modules and assembled by
+`backend/apps/admin/routers.py`. The small modules under `backend/apps/admin/`
+that share feature names are compatibility exports and contain no business or
+persistence logic.
+
 Public catalog reads are locale-scoped. Use lowercase locale codes in the URL:
 `en-us`, `hy-am`, or `ru-ru`.
 
@@ -117,7 +134,7 @@ and synchronize the local account. `GET /api/v1/accounts/me` and all other
 authenticated routes accept the same Bearer token. Firebase client SDKs refresh ID
 tokens automatically; this API does not issue access or refresh tokens.
 
-Use `backend.apps.accounts.auth.RequireAuth` on protected route handlers to
+Use `backend.apps.accounts.dependencies.RequireAuth` on protected route handlers to
 require a valid Firebase identity:
 
 ```py
@@ -134,7 +151,8 @@ from typing import Annotated
 
 from fastapi import Depends
 
-from backend.apps.accounts.auth import RoleChecker, UserIdentity
+from backend.apps.accounts.dependencies import RoleChecker
+from backend.apps.accounts.schemas import UserIdentity
 
 Subscriber = Annotated[UserIdentity, Depends(RoleChecker("subscriber"))]
 ```

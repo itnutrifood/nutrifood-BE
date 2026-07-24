@@ -1,0 +1,2 @@
+class InvalidCursorError(ValueError):
+    pass

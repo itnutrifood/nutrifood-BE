@@ -1,28 +1,20 @@
-from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import cast
 from uuid import UUID
 
 import asyncpg
 
-from backend.apps.admin.testimonials import (
-    TESTIMONIAL_COLUMNS,
-    TestimonialRead,
-    _testimonial_from_record,
-)
-from backend.apps.common.enums import TestimonialStatus
+from backend.apps.common.exceptions import InvalidCursorError
 from backend.apps.common.pagination import (
     CursorPage,
-    InvalidCursorError,
     decode_cursor,
     encode_cursor,
 )
-from backend.apps.testimonials.schemas import PublicTestimonialRead
+from backend.apps.testimonials import repository
+from backend.apps.testimonials.exceptions import TestimonialNotFoundError
+from backend.apps.testimonials.schemas import PublicTestimonialRead, TestimonialRead
 
-
-class PublicTestimonialNotFoundError(Exception):
-    pass
+PublicTestimonialNotFoundError = TestimonialNotFoundError
 
 
 @dataclass(frozen=True)
@@ -76,46 +68,26 @@ async def list_public_testimonials(
     limit: int,
     cursor: str | None,
 ) -> CursorPage[PublicTestimonialRead]:
-    params: list[object] = [TestimonialStatus.ACTIVE.value]
-    cursor_condition = ""
+    parsed_cursor: TestimonialCursor | None = None
     if cursor is not None:
-        testimonial_cursor = _parse_testimonial_cursor(cursor)
-        params.extend(
-            [
-                testimonial_cursor.sort_order,
-                testimonial_cursor.created_at,
-                testimonial_cursor.id,
-            ]
-        )
-        cursor_condition = """
-            AND (
-                sort_order > $2
-                OR (
-                    sort_order = $2
-                    AND (created_at, id) < ($3, $4)
-                )
-            )
-        """
+        parsed_cursor = _parse_testimonial_cursor(cursor)
 
-    params.append(limit + 1)
-    rows = cast(
-        Sequence[Mapping[str, object]],
-        await pool.fetch(
-            f"""
-            SELECT {TESTIMONIAL_COLUMNS}
-            FROM testimonials
-            WHERE status = $1::testimonial_status
-            {cursor_condition}
-            ORDER BY sort_order, created_at DESC, id DESC
-            LIMIT ${len(params)}
-            """,
-            *params,
-        ),
+    testimonials = await repository.list_active_testimonials(
+        pool,
+        limit,
+        (
+            parsed_cursor.sort_order,
+            parsed_cursor.created_at,
+            parsed_cursor.id,
+        )
+        if parsed_cursor is not None
+        else None,
     )
-    testimonials = [_testimonial_from_record(row) for row in rows[:limit]]
-    next_cursor = _testimonial_cursor(testimonials[-1]) if len(rows) > limit else None
+    next_cursor = (
+        _testimonial_cursor(testimonials[limit - 1]) if len(testimonials) > limit else None
+    )
     return CursorPage(
-        items=[_public_testimonial(testimonial) for testimonial in testimonials],
+        items=[_public_testimonial(testimonial) for testimonial in testimonials[:limit]],
         limit=limit,
         next_cursor=next_cursor,
     )
@@ -125,22 +97,8 @@ async def get_public_testimonial(
     pool: asyncpg.Pool,
     testimonial_id: UUID,
 ) -> PublicTestimonialRead:
-    row = cast(
-        Mapping[str, object] | None,
-        await pool.fetchrow(
-            f"""
-            SELECT {TESTIMONIAL_COLUMNS}
-            FROM testimonials
-            WHERE id = $1
-                AND status = $2::testimonial_status
-            """,
-            testimonial_id,
-            TestimonialStatus.ACTIVE.value,
-        ),
-    )
-    if row is None:
-        raise PublicTestimonialNotFoundError
-    return _public_testimonial(_testimonial_from_record(row))
+    testimonial = await repository.get_active_testimonial(pool, testimonial_id)
+    return _public_testimonial(testimonial)
 
 
 def _public_testimonial(testimonial: TestimonialRead) -> PublicTestimonialRead:

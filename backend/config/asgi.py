@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 
 from backend.config.database import lifespan
+from backend.config.exception_handlers import register_exception_handlers
 from backend.config.settings import get_settings
 from backend.config.urls import api_router
 
@@ -12,6 +13,7 @@ app = FastAPI(
     lifespan=lifespan,
     swagger_ui_parameters={"persistAuthorization": True},
 )
+register_exception_handlers(app)
 
 app.include_router(api_router, prefix=settings.api_root_prefix)
 

@@ -1,7 +1,8 @@
 from fastapi import APIRouter
 
-from backend.apps.accounts.auth import RequireAuth, UserRead
-from backend.apps.accounts.auth import router as auth_router
+from backend.apps.accounts.auth_routers import router as auth_router
+from backend.apps.accounts.dependencies import RequireAuth
+from backend.apps.accounts.schemas import UserRead
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
 

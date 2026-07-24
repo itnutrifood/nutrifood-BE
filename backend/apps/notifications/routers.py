@@ -1,8 +1,8 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, status
 
-from backend.apps.accounts.auth import DbPool, RequireAuth
+from backend.apps.accounts.dependencies import RequireAuth
 from backend.apps.notifications.schemas import (
     FcmInstallationRegistration,
     FcmInstallationRemoval,
@@ -12,13 +12,13 @@ from backend.apps.notifications.schemas import (
 )
 from backend.apps.notifications.security import require_non_production_environment
 from backend.apps.notifications.service import (
-    FcmRegistrationNotFoundError,
     register_fcm_installation,
     register_fcm_token,
     remove_fcm_installation,
     remove_fcm_token,
     send_test_notification,
 )
+from backend.config.database import DbPool
 from backend.config.firebase import FirebaseServiceDependency
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
@@ -34,13 +34,7 @@ async def send_test_notification_to_current_user(
     pool: DbPool,
     firebase_service: FirebaseServiceDependency,
 ) -> TestNotificationRead:
-    try:
-        message_id = await send_test_notification(pool, firebase_service, current_user.id)
-    except FcmRegistrationNotFoundError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No FCM registration found for the current user",
-        ) from exc
+    message_id = await send_test_notification(pool, firebase_service, current_user.id)
     return TestNotificationRead(message_id=message_id)
 
 

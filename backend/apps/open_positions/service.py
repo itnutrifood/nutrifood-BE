@@ -1,29 +1,22 @@
-from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import cast
 from uuid import UUID
 
 import asyncpg
 
-from backend.apps.admin.open_positions import (
-    OPEN_POSITION_COLUMNS,
-    OpenPositionRead,
-    _open_position_from_record,
-)
-from backend.apps.common.enums import EmploymentType, LanguageCode, OpenPositionStatus
+from backend.apps.common.enums import EmploymentType, LanguageCode
+from backend.apps.common.exceptions import InvalidCursorError
 from backend.apps.common.localization import required_localized_text
 from backend.apps.common.pagination import (
     CursorPage,
-    InvalidCursorError,
     decode_cursor,
     encode_cursor,
 )
-from backend.apps.open_positions.schemas import PublicOpenPositionRead
+from backend.apps.open_positions import repository
+from backend.apps.open_positions.exceptions import OpenPositionNotFoundError
+from backend.apps.open_positions.schemas import OpenPositionRead, PublicOpenPositionRead
 
-
-class PublicOpenPositionNotFoundError(Exception):
-    pass
+PublicOpenPositionNotFoundError = OpenPositionNotFoundError
 
 
 @dataclass(frozen=True)
@@ -61,33 +54,20 @@ async def list_public_open_positions(
     limit: int,
     cursor: str | None,
 ) -> CursorPage[PublicOpenPositionRead]:
-    params: list[object] = [OpenPositionStatus.ACTIVE.value]
-    conditions = ["status = $1::open_position_status"]
-    if employment_type is not None:
-        params.append(employment_type.value)
-        conditions.append(f"employment_type = ${len(params)}::employment_type")
+    parsed_cursor: OpenPositionCursor | None = None
     if cursor is not None:
         parsed_cursor = _parse_open_position_cursor(cursor)
-        params.extend([parsed_cursor.created_at, parsed_cursor.id])
-        conditions.append(f"(created_at, id) < (${len(params) - 1}, ${len(params)})")
-    params.append(limit + 1)
-    rows = cast(
-        Sequence[Mapping[str, object]],
-        await pool.fetch(
-            f"""
-            SELECT {OPEN_POSITION_COLUMNS}
-            FROM open_positions
-            WHERE {" AND ".join(conditions)}
-            ORDER BY created_at DESC, id DESC
-            LIMIT ${len(params)}
-            """,
-            *params,
-        ),
+    open_positions = await repository.list_active_open_positions(
+        pool,
+        employment_type,
+        limit,
+        (parsed_cursor.created_at, parsed_cursor.id) if parsed_cursor is not None else None,
     )
-    open_positions = [_open_position_from_record(row) for row in rows[:limit]]
-    next_cursor = _open_position_cursor(open_positions[-1]) if len(rows) > limit else None
+    next_cursor = (
+        _open_position_cursor(open_positions[limit - 1]) if len(open_positions) > limit else None
+    )
     return CursorPage(
-        items=[_public_open_position(item, language) for item in open_positions],
+        items=[_public_open_position(item, language) for item in open_positions[:limit]],
         limit=limit,
         next_cursor=next_cursor,
     )
@@ -96,21 +76,8 @@ async def list_public_open_positions(
 async def get_public_open_position(
     pool: asyncpg.Pool, language: LanguageCode, open_position_id: UUID
 ) -> PublicOpenPositionRead:
-    row = cast(
-        Mapping[str, object] | None,
-        await pool.fetchrow(
-            f"""
-            SELECT {OPEN_POSITION_COLUMNS}
-            FROM open_positions
-            WHERE id = $1 AND status = $2::open_position_status
-            """,
-            open_position_id,
-            OpenPositionStatus.ACTIVE.value,
-        ),
-    )
-    if row is None:
-        raise PublicOpenPositionNotFoundError
-    return _public_open_position(_open_position_from_record(row), language)
+    open_position = await repository.get_active_open_position(pool, open_position_id)
+    return _public_open_position(open_position, language)
 
 
 def _public_open_position(

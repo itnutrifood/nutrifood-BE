@@ -1,27 +1,21 @@
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import cast
 from uuid import UUID
 
 import asyncpg
 
-from backend.apps.admin.products import PRODUCT_COLUMNS, ProductRead, _product_from_record
 from backend.apps.common.enums import LanguageCode
+from backend.apps.common.exceptions import InvalidCursorError
 from backend.apps.common.pagination import (
     CursorPage,
-    InvalidCursorError,
     decode_cursor,
     encode_cursor,
 )
+from backend.apps.favorites import repository
+from backend.apps.favorites.exceptions import FavoriteProductNotFoundError
 from backend.apps.products.schemas import PublicProductRead
 from backend.apps.products.service import to_public_product
-
-
-class FavoriteProductNotFoundError(Exception):
-    def __init__(self, product_ids: Sequence[UUID]) -> None:
-        self.product_ids = list(product_ids)
-        super().__init__("One or more products were not found")
 
 
 @dataclass(frozen=True)
@@ -63,46 +57,29 @@ async def list_favorite_products(
     limit: int,
     cursor: str | None,
 ) -> CursorPage[PublicProductRead]:
-    params: list[object] = [user_id]
-    cursor_condition = ""
-
+    parsed_cursor: FavoriteCursor | None = None
     if cursor is not None:
-        favorite_cursor = _parse_favorite_cursor(cursor)
-        params.extend([favorite_cursor.created_at, favorite_cursor.product_id])
-        cursor_condition = """
-            AND (uf.created_at, uf.product_id) < ($2, $3)
-        """
+        parsed_cursor = _parse_favorite_cursor(cursor)
 
-    params.append(limit + 1)
-    rows = cast(
-        Sequence[Mapping[str, object]],
-        await pool.fetch(
-            f"""
-            SELECT {PRODUCT_COLUMNS},
-                uf.created_at AS favorited_at
-            FROM user_favorite_products AS uf
-            INNER JOIN products AS p ON p.id = uf.product_id
-            WHERE uf.user_id = $1
-            {cursor_condition}
-            ORDER BY uf.created_at DESC, uf.product_id DESC
-            LIMIT ${len(params)}
-            """,
-            *params,
-        ),
+    favorite_products = await repository.list_favorite_products(
+        pool,
+        user_id,
+        limit,
+        (parsed_cursor.created_at, parsed_cursor.product_id) if parsed_cursor is not None else None,
     )
-
-    page_rows = rows[:limit]
-    products: list[ProductRead] = [_product_from_record(row) for row in page_rows]
     next_cursor = None
-    if len(rows) > limit:
-        last_row = page_rows[-1]
+    if len(favorite_products) > limit:
+        last_product, favorited_at = favorite_products[limit - 1]
         next_cursor = _favorite_cursor(
-            cast(datetime, last_row["favorited_at"]),
-            cast(UUID, last_row["id"]),
+            favorited_at,
+            last_product.id,
         )
 
     return CursorPage(
-        items=[to_public_product(product, language) for product in products],
+        items=[
+            to_public_product(product, language)
+            for product, _favorited_at in favorite_products[:limit]
+        ],
         limit=limit,
         next_cursor=next_cursor,
     )
@@ -113,25 +90,12 @@ async def add_favorite_product(
     user_id: UUID,
     product_id: UUID,
 ) -> None:
-    product_exists = await pool.fetchval(
-        """
-        WITH matching_product AS (
-            SELECT id
-            FROM products
-            WHERE id = $2
-        ), inserted_favorite AS (
-            INSERT INTO user_favorite_products (user_id, product_id)
-            SELECT $1, id
-            FROM matching_product
-            ON CONFLICT (user_id, product_id) DO NOTHING
-            RETURNING product_id
-        )
-        SELECT EXISTS (SELECT 1 FROM matching_product)
-        """,
+    product_exists = await repository.add_favorite_product(
+        pool,
         user_id,
         product_id,
     )
-    if product_exists is not True:
+    if not product_exists:
         raise FavoriteProductNotFoundError([product_id])
 
 
@@ -140,38 +104,10 @@ async def add_favorite_products(
     user_id: UUID,
     product_ids: Sequence[UUID],
 ) -> None:
-    missing_product_ids = cast(
-        Sequence[UUID],
-        await pool.fetchval(
-            """
-            WITH requested_products AS (
-                SELECT DISTINCT unnest($2::uuid[]) AS product_id
-            ), matching_products AS (
-                SELECT requested.product_id
-                FROM requested_products AS requested
-                INNER JOIN products AS p ON p.id = requested.product_id
-            ), inserted_favorites AS (
-                INSERT INTO user_favorite_products (user_id, product_id)
-                SELECT $1, matching.product_id
-                FROM matching_products AS matching
-                WHERE
-                    (SELECT count(*) FROM matching_products)
-                    = (SELECT count(*) FROM requested_products)
-                ON CONFLICT (user_id, product_id) DO NOTHING
-                RETURNING product_id
-            )
-            SELECT COALESCE(
-                array_agg(requested.product_id ORDER BY requested.product_id)
-                    FILTER (WHERE matching.product_id IS NULL),
-                ARRAY[]::uuid[]
-            )
-            FROM requested_products AS requested
-            LEFT JOIN matching_products AS matching
-                ON matching.product_id = requested.product_id
-            """,
-            user_id,
-            list(product_ids),
-        ),
+    missing_product_ids = await repository.add_favorite_products(
+        pool,
+        user_id,
+        product_ids,
     )
     if missing_product_ids:
         raise FavoriteProductNotFoundError(missing_product_ids)
@@ -182,11 +118,4 @@ async def remove_favorite_product(
     user_id: UUID,
     product_id: UUID,
 ) -> None:
-    await pool.execute(
-        """
-        DELETE FROM user_favorite_products
-        WHERE user_id = $1 AND product_id = $2
-        """,
-        user_id,
-        product_id,
-    )
+    await repository.remove_favorite_product(pool, user_id, product_id)

@@ -1,0 +1,2 @@
+class TestimonialNotFoundError(Exception):
+    pass
