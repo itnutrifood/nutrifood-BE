@@ -81,6 +81,7 @@ def current_user() -> UserIdentity:
         first_name="Jane",
         last_name="Doe",
         email="jane@example.com",
+        registration_provider="google.com",
         sign_in_provider="google.com",
         roles=frozenset(),
         created_at=NOW,

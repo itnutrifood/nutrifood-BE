@@ -95,6 +95,7 @@ def identity_from_user(
         first_name=user.first_name,
         last_name=user.last_name,
         email=user.email,
+        registration_provider=user.registration_provider,
         sign_in_provider=firebase_identity.sign_in_provider,
         roles=firebase_identity.roles,
         created_at=user.created_at,

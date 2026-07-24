@@ -19,6 +19,7 @@ USER_COLUMNS = """
     first_name,
     last_name,
     email,
+    registration_provider,
     is_active,
     created_at,
     updated_at
@@ -32,6 +33,7 @@ def user_from_record(record: Mapping[str, object]) -> UserRecord:
         first_name=cast(str | None, record["first_name"]),
         last_name=cast(str | None, record["last_name"]),
         email=cast(str, record["email"]),
+        registration_provider=cast(str, record["registration_provider"]),
         is_active=cast(bool, record["is_active"]),
         created_at=cast(datetime, record["created_at"]),
         updated_at=cast(datetime, record["updated_at"]),
@@ -117,16 +119,18 @@ async def create_user(
                     first_name,
                     last_name,
                     email,
+                    registration_provider,
                     password_hash,
                     last_login_at
                 )
-                VALUES ($1, $2, $3, $4, NULL, now())
+                VALUES ($1, $2, $3, $4, $5, NULL, now())
                 RETURNING {USER_COLUMNS}
                 """,
                 identity.uid,
                 identity.first_name,
                 identity.last_name,
                 identity.email,
+                identity.sign_in_provider,
             ),
         )
     except asyncpg.UniqueViolationError:

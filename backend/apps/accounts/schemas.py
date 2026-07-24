@@ -9,6 +9,7 @@ class UserRead(BaseModel):
     first_name: str | None
     last_name: str | None
     email: EmailStr
+    registration_provider: str
     created_at: datetime
     updated_at: datetime
 

@@ -116,7 +116,9 @@ The API verifies the token with the Firebase Admin SDK, including account
 revocation/disablement checks. By default it accepts only the `password` and
 `google.com` providers and requires `email_verified=true`. A local `users` row is
 created on the first authenticated request; existing local accounts with the same
-verified email are linked automatically.
+verified email are linked automatically. The local row stores an immutable
+`registration_provider` derived from the verified Firebase token. Later sign-ins
+through another linked provider do not change the original value.
 
 Configure the Admin SDK in `.env`:
 
@@ -132,7 +134,8 @@ FIREBASE_ALLOWED_SIGN_IN_PROVIDERS=["password","google.com"]
 Call `POST /api/v1/accounts/auth/session` after client sign-in to verify the token
 and synchronize the local account. `GET /api/v1/accounts/me` and all other
 authenticated routes accept the same Bearer token. Firebase client SDKs refresh ID
-tokens automatically; this API does not issue access or refresh tokens.
+tokens automatically; this API does not issue access or refresh tokens. Both
+`/auth/session` and `/accounts/me` return the stored `registration_provider`.
 
 Use `backend.apps.accounts.dependencies.RequireAuth` on protected route handlers to
 require a valid Firebase identity:

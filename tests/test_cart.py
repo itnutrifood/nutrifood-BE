@@ -31,6 +31,7 @@ def current_user() -> UserIdentity:
         first_name="Jane",
         last_name="Doe",
         email="jane@example.com",
+        registration_provider="password",
         sign_in_provider="password",
         roles=frozenset(),
         created_at=NOW,

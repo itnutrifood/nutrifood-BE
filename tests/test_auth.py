@@ -21,6 +21,7 @@ def user_record(
     *,
     firebase_uid: str | None = FIREBASE_UID,
     is_active: bool = True,
+    registration_provider: str = "password",
 ) -> dict[str, object]:
     return {
         "id": USER_ID,
@@ -28,6 +29,7 @@ def user_record(
         "first_name": "Jane",
         "last_name": "Doe",
         "email": USER_EMAIL,
+        "registration_provider": registration_provider,
         "is_active": is_active,
         "created_at": CREATED_AT,
         "updated_at": CREATED_AT,
@@ -99,7 +101,10 @@ class FirebaseAuthPool:
 
         if "INSERT INTO users" in query:
             self.created_args = args
-            self.record = user_record(firebase_uid=str(args[0]))
+            self.record = user_record(
+                firebase_uid=str(args[0]),
+                registration_provider=str(args[4]),
+            )
             return self.record
 
         if "SET firebase_uid = $2" in query:
@@ -175,6 +180,7 @@ def test_firebase_password_token_authorizes_existing_user(monkeypatch: Any) -> N
         "first_name": "Jane",
         "last_name": "Doe",
         "email": USER_EMAIL,
+        "registration_provider": "password",
         "created_at": "2026-01-01T00:00:00Z",
         "updated_at": "2026-01-01T00:00:00Z",
     }
@@ -197,11 +203,39 @@ def test_firebase_google_token_creates_local_user(monkeypatch: Any) -> None:
 
     assert response.status_code == 200
     assert response.json()["email"] == USER_EMAIL
+    assert response.json()["registration_provider"] == "google.com"
     assert pool.created_args == (
         FIREBASE_UID,
         "Jane",
         "Doe",
         USER_EMAIL,
+        "google.com",
+    )
+
+
+def test_firebase_password_token_creates_user_with_registration_provider(
+    monkeypatch: Any,
+) -> None:
+    pool = EmptyFirebaseAuthPool()
+    app, _ = configure_test_app(monkeypatch, pool)
+
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/accounts/auth/session",
+                headers={"Authorization": "Bearer password-firebase-id-token"},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["registration_provider"] == "password"
+    assert pool.created_args == (
+        FIREBASE_UID,
+        "Jane",
+        "Doe",
+        USER_EMAIL,
+        "password",
     )
 
 
@@ -219,7 +253,28 @@ def test_verified_firebase_email_links_legacy_user(monkeypatch: Any) -> None:
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
+    assert response.json()["registration_provider"] == "password"
     assert pool.linked_args == (USER_ID, FIREBASE_UID, "Jane", "Doe")
+
+
+def test_later_login_does_not_change_registration_provider(monkeypatch: Any) -> None:
+    pool = FirebaseAuthPool(record=user_record(registration_provider="password"))
+    service = FakeFirebaseService(claims=firebase_claims(provider="google.com"))
+    app, _ = configure_test_app(monkeypatch, pool, service)
+
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/accounts/auth/session",
+                headers={"Authorization": "Bearer google-firebase-id-token"},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["registration_provider"] == "password"
+    assert pool.record is not None
+    assert pool.record["registration_provider"] == "password"
 
 
 def test_accounts_me_requires_bearer_token(monkeypatch: Any) -> None:
@@ -315,6 +370,7 @@ async def test_role_checker_requires_all_custom_claim_roles() -> None:
         first_name="Jane",
         last_name="Doe",
         email=USER_EMAIL,
+        registration_provider="google.com",
         sign_in_provider="google.com",
         roles=frozenset({"subscriber", "beta"}),
         created_at=CREATED_AT,
