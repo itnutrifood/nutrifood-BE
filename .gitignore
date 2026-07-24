@@ -13,3 +13,5 @@ build/
 .idea/
 .DS_Store
 postgres-data/
+firebase.json
+firebase-credentials*.json

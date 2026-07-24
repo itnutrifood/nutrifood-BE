@@ -1,5 +1,6 @@
 import re
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -34,6 +35,9 @@ class Settings(BaseSettings):
     user_token_algorithm: str = "HS256"
     user_access_token_expire_minutes: int = Field(default=15, gt=0)
     user_refresh_token_expire_days: int = Field(default=30, gt=0)
+
+    firebase_credentials_path: Path | None = None
+    firebase_project_id: str | None = None
 
     @property
     def api_root_prefix(self) -> str:
