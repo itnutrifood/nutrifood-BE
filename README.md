@@ -78,19 +78,47 @@ your PostgreSQL host.
 
 ## User authentication
 
-Public sign-up and sign-in use local user accounts with JWT access and refresh
-tokens. User records are stored in the `users` table. Configure these values in
-`.env`:
+User authentication is managed by Firebase Authentication. Enable these sign-in
+providers in the Firebase console:
 
-```sh
-USER_TOKEN_SECRET=change-me-to-a-different-long-random-secret
-USER_TOKEN_ALGORITHM=HS256
-USER_ACCESS_TOKEN_EXPIRE_MINUTES=15
-USER_REFRESH_TOKEN_EXPIRE_DAYS=30
+- Email/Password
+- Google
+
+Also enable email-enumeration protection for password authentication and configure
+the authorized domains and OAuth consent screen for each deployed frontend.
+
+Client applications sign up or sign in with the Firebase SDK. Passwords and Google
+OAuth credentials must not be sent to this API. After authentication, retrieve the
+Firebase ID token and send it over HTTPS:
+
+```http
+Authorization: Bearer <firebase-id-token>
 ```
 
+The API verifies the token with the Firebase Admin SDK, including account
+revocation/disablement checks. By default it accepts only the `password` and
+`google.com` providers and requires `email_verified=true`. A local `users` row is
+created on the first authenticated request; existing local accounts with the same
+verified email are linked automatically.
+
+Configure the Admin SDK in `.env`:
+
+```sh
+# Prefer Application Default Credentials when running on Google Cloud. Otherwise,
+# mount this service-account JSON file as a secret; never commit it.
+FIREBASE_CREDENTIALS_PATH=firebase.json
+FIREBASE_PROJECT_ID=nutrifood-dev
+FIREBASE_REQUIRE_VERIFIED_EMAIL=true
+FIREBASE_ALLOWED_SIGN_IN_PROVIDERS=["password","google.com"]
+```
+
+Call `POST /api/v1/accounts/auth/session` after client sign-in to verify the token
+and synchronize the local account. `GET /api/v1/accounts/me` and all other
+authenticated routes accept the same Bearer token. Firebase client SDKs refresh ID
+tokens automatically; this API does not issue access or refresh tokens.
+
 Use `backend.apps.accounts.auth.RequireAuth` on protected route handlers to
-require a valid user access token:
+require a valid Firebase identity:
 
 ```py
 @router.get("/me")
@@ -98,29 +126,18 @@ async def read_current_user(current_user: RequireAuth) -> dict[str, object]:
     return {"email": current_user.email}
 ```
 
-Sign up at `POST /api/v1/accounts/auth/signup`:
+Authorization roles come from a Firebase custom claim named `roles`. Set custom
+claims only from a privileged server environment, then enforce all required roles:
 
-```json
-{
-  "first_name": "Jane",
-  "last_name": "Doe",
-  "email": "jane@example.com",
-  "password": "correct-password",
-  "confirm_password": "correct-password"
-}
+```py
+from typing import Annotated
+
+from fastapi import Depends
+
+from backend.apps.accounts.auth import RoleChecker, UserIdentity
+
+Subscriber = Annotated[UserIdentity, Depends(RoleChecker("subscriber"))]
 ```
-
-Sign in at `POST /api/v1/accounts/auth/login`:
-
-```json
-{
-  "email": "jane@example.com",
-  "password": "correct-password"
-}
-```
-
-Clients must send the returned access token as `Authorization: Bearer <token>`.
-Refresh tokens can be exchanged at `POST /api/v1/accounts/auth/refresh`.
 
 Authenticated users can manage their favorite products with locale-scoped endpoints:
 
@@ -128,6 +145,53 @@ Authenticated users can manage their favorite products with locale-scoped endpoi
 - `PUT /api/v1/{locale}/favorites` with `{"product_ids": ["<product-uuid>"]}`
 - `PUT /api/v1/{locale}/favorites/{product_id}`
 - `DELETE /api/v1/{locale}/favorites/{product_id}`
+
+## FCM registrations
+
+Firebase is transitioning from legacy registration tokens to Firebase Installation
+IDs (FIDs). New clients should upload their FID on app startup and whenever the FCM
+SDK invokes its registration callback:
+
+```http
+PUT /api/v1/notifications/fcm-registrations
+Authorization: Bearer <firebase-id-token>
+Content-Type: application/json
+
+{"fid": "<firebase-installation-id>", "platform": "android"}
+```
+
+Supported platforms are `android`, `ios`, and `web`. The operation is idempotent,
+reassigns a registration when a device changes accounts, and refreshes a
+server-side `last_seen_at` timestamp. Registration identifiers are never returned
+by the API or placed in URLs. On sign-out, unregister it with:
+
+```http
+DELETE /api/v1/notifications/fcm-registrations
+Authorization: Bearer <firebase-id-token>
+Content-Type: application/json
+
+{"fid": "<firebase-installation-id>"}
+```
+
+Legacy clients can use the deprecated `PUT` and `DELETE`
+`/api/v1/notifications/fcm-tokens` endpoints with
+`{"token": "<fcm-registration-token>", ...}`.
+
+Notification sending code should remove registrations when FCM reports them as
+unregistered and periodically prune stale `last_seen_at` rows. A one-month
+staleness threshold is a reasonable default and can be tuned for the product.
+
+In `local`, `development`, `test`, and other non-production environments, an
+authenticated user can send a fixed test notification to their freshest registered
+installation:
+
+```http
+POST /api/v1/notifications/test
+Authorization: Bearer <firebase-id-token>
+```
+
+The test endpoint returns `404` when `ENVIRONMENT` is `prod` or `production`, and
+also returns `404` when the current user has no FCM registration.
 
 ## Cart
 
@@ -144,7 +208,7 @@ request is safe:
 
 The bulk `PUT` is intended for syncing a locally stored guest cart after login. It
 upserts all supplied quantities atomically and leaves other existing cart items in
-place. Server-side cart endpoints require an access token.
+place. Server-side cart endpoints require a Firebase ID token.
 
 Testimonials are managed through `/api/v1/admin/testimonials`. Active testimonials are
 available publicly from `GET /api/v1/testimonials` and `GET /api/v1/testimonials/{id}`.

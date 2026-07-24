@@ -31,13 +31,10 @@ class Settings(BaseSettings):
     admin_access_token_expire_minutes: int = Field(default=15, gt=0)
     admin_refresh_token_expire_days: int = Field(default=7, gt=0)
 
-    user_token_secret: str = ""
-    user_token_algorithm: str = "HS256"
-    user_access_token_expire_minutes: int = Field(default=15, gt=0)
-    user_refresh_token_expire_days: int = Field(default=30, gt=0)
-
     firebase_credentials_path: Path | None = None
     firebase_project_id: str | None = None
+    firebase_require_verified_email: bool = True
+    firebase_allowed_sign_in_providers: frozenset[str] = frozenset({"password", "google.com"})
 
     @property
     def api_root_prefix(self) -> str:
@@ -46,6 +43,10 @@ class Settings(BaseSettings):
         if base_prefix and re.fullmatch(r"v[0-9]+", last_segment):
             return base_prefix
         return prefix
+
+    @property
+    def is_production(self) -> bool:
+        return self.environment.strip().casefold() in {"prod", "production"}
 
 
 @lru_cache

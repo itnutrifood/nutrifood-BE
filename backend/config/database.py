@@ -5,13 +5,13 @@ from typing import TypedDict, cast
 import asyncpg
 from fastapi import FastAPI, Request
 
-from backend.config.firebase import FirebaseMessaging, create_firebase_messaging
+from backend.config.firebase import FirebaseService, create_firebase_service
 from backend.config.settings import get_settings
 
 
 class AppState(TypedDict):
     db_pool: asyncpg.Pool
-    firebase_messaging: FirebaseMessaging
+    firebase_service: FirebaseService
 
 
 async def create_pool() -> asyncpg.Pool:
@@ -22,16 +22,16 @@ async def create_pool() -> asyncpg.Pool:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     pool = await create_pool()
-    firebase_messaging: FirebaseMessaging | None = None
+    firebase_service: FirebaseService | None = None
     try:
-        firebase_messaging = create_firebase_messaging()
+        firebase_service = create_firebase_service()
         app.state.db_pool = pool
-        app.state.firebase_messaging = firebase_messaging
+        app.state.firebase_service = firebase_service
         yield
     finally:
         try:
-            if firebase_messaging is not None:
-                firebase_messaging.close()
+            if firebase_service is not None:
+                firebase_service.close()
         finally:
             await pool.close()
 

@@ -28,10 +28,12 @@ async def create_dummy_pool() -> DummyPool:
 def current_user() -> UserIdentity:
     return UserIdentity(
         id=USER_ID,
+        firebase_uid="firebase-user-uid",
         first_name="Jane",
         last_name="Doe",
         email="jane@example.com",
-        token_version=1,
+        sign_in_provider="password",
+        roles=frozenset(),
         created_at=NOW,
         updated_at=NOW,
     )
