@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     environment: str = "local"
     debug: bool = True
     api_prefix: str = "/api"
+    cors_origins: tuple[str, ...] = (
+        "http://localhost:3000",
+        "http://localhost:5173",
+    )
 
     postgres_db: str = "nutrifood"
     postgres_user: str = "nutrifood"

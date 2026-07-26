@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from backend.config.database import lifespan
 from backend.config.exception_handlers import register_exception_handlers
@@ -12,6 +13,13 @@ app = FastAPI(
     debug=settings.debug,
     lifespan=lifespan,
     swagger_ui_parameters={"persistAuthorization": True},
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 register_exception_handlers(app)
 

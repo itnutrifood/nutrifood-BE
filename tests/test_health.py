@@ -52,3 +52,26 @@ def test_swagger_ui_persists_authorization(monkeypatch: Any) -> None:
 
     assert response.status_code == 200
     assert '"persistAuthorization": true' in response.text
+
+
+def test_cors_preflight_allows_configured_origin(monkeypatch: Any) -> None:
+    from backend.config import database
+    from backend.config.asgi import app, settings
+
+    monkeypatch.setattr(database, "create_pool", create_dummy_pool)
+    origin = settings.cors_origins[0]
+
+    with TestClient(app) as client:
+        response = client.options(
+            "/health",
+            headers={
+                "Origin": origin,
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "Authorization",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == origin
+    assert response.headers["access-control-allow-credentials"] == "true"
+    assert "authorization" in response.headers["access-control-allow-headers"].lower()
