@@ -10,6 +10,8 @@ from backend.apps.notifications.schemas import (
     FcmInstallationRemoval,
     FcmTokenRegistration,
     FcmTokenRemoval,
+    NotificationPreferencesRead,
+    NotificationPreferencesUpdate,
 )
 from backend.config.firebase import FirebaseService
 
@@ -91,3 +93,18 @@ async def send_test_notification(
         data={"type": "test_notification"},
     )
     return await firebase_service.send(message)
+
+
+async def get_notification_preferences(
+    pool: asyncpg.Pool,
+    user_id: UUID,
+) -> NotificationPreferencesRead:
+    return await repository.get_notification_preferences(pool, user_id)
+
+
+async def update_notification_preferences(
+    pool: asyncpg.Pool,
+    user_id: UUID,
+    payload: NotificationPreferencesUpdate,
+) -> NotificationPreferencesRead:
+    return await repository.update_notification_preferences(pool, user_id, payload)

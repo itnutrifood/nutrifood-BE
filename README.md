@@ -167,6 +167,30 @@ Authenticated users can manage their favorite products with locale-scoped endpoi
 - `PUT /api/v1/{locale}/favorites/{product_id}`
 - `DELETE /api/v1/{locale}/favorites/{product_id}`
 
+## Notification preferences
+
+Each user has email notification preferences for order confirmations, delivery updates,
+subscription reminders, the weekly newsletter, promotional offers, and new menu items.
+Read the current settings with:
+
+```http
+GET /api/v1/notifications/preferences
+Authorization: Bearer <firebase-id-token>
+```
+
+Update one or more settings without replacing the others:
+
+```http
+PATCH /api/v1/notifications/preferences
+Authorization: Bearer <firebase-id-token>
+Content-Type: application/json
+
+{"weekly_newsletter": false, "promotional_offers": true}
+```
+
+Order confirmations, delivery updates, subscription reminders, the weekly newsletter,
+and new menu items default to enabled. Promotional offers default to disabled.
+
 ## FCM registrations
 
 Firebase is transitioning from legacy registration tokens to Firebase Installation

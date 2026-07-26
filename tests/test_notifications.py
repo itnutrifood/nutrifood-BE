@@ -16,6 +16,21 @@ FCM_TOKEN = "fcm-registration-token-at-least-twenty-characters"
 FIREBASE_FID = "firebase-installation-id-at-least-twenty-characters"
 
 
+def notification_preferences(
+    *,
+    weekly_newsletter: bool = True,
+    promotional_offers: bool = False,
+) -> dict[str, object]:
+    return {
+        "order_confirmations": True,
+        "delivery_updates": True,
+        "subscription_reminders": True,
+        "weekly_newsletter": weekly_newsletter,
+        "promotional_offers": promotional_offers,
+        "new_menu_items": True,
+    }
+
+
 def registration_hash(registration_type: str, registration_id: str) -> bytes:
     return sha256(f"{registration_type}\0{registration_id}".encode()).digest()
 
@@ -60,6 +75,21 @@ class FcmTokenPool:
         return self.registration
 
 
+class NotificationPreferencesPool:
+    def __init__(self, record: dict[str, object] | None = None) -> None:
+        self.record = record or notification_preferences()
+        self.query: str | None = None
+        self.args: tuple[object, ...] | None = None
+
+    async def fetchrow(self, query: str, *args: object) -> dict[str, object]:
+        assert "FROM user_notification_preferences" in query or (
+            "INSERT INTO user_notification_preferences" in query
+        )
+        self.query = query
+        self.args = args
+        return self.record
+
+
 class FakeFirebaseService:
     def __init__(self) -> None:
         self.message: messaging.Message | None = None
@@ -91,7 +121,7 @@ def current_user() -> UserIdentity:
 
 def configure_test_app(
     monkeypatch: Any,
-    pool: FcmTokenPool,
+    pool: object,
     *,
     authenticated: bool = True,
     environment: str = "local",
@@ -117,6 +147,90 @@ def configure_test_app(
     if authenticated:
         app.dependency_overrides[get_current_user] = current_user
     return app
+
+
+def test_read_notification_preferences_returns_current_users_settings(
+    monkeypatch: Any,
+) -> None:
+    pool = NotificationPreferencesPool()
+    app = configure_test_app(monkeypatch, pool)
+
+    try:
+        with TestClient(app) as client:
+            response = client.get("/api/v1/notifications/preferences")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json() == notification_preferences()
+    assert pool.args == (USER_ID,)
+
+
+def test_patch_notification_preferences_updates_only_provided_settings(
+    monkeypatch: Any,
+) -> None:
+    pool = NotificationPreferencesPool(
+        notification_preferences(weekly_newsletter=False, promotional_offers=True)
+    )
+    app = configure_test_app(monkeypatch, pool)
+
+    try:
+        with TestClient(app) as client:
+            response = client.patch(
+                "/api/v1/notifications/preferences",
+                json={"promotional_offers": True, "weekly_newsletter": False},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json() == notification_preferences(
+        weekly_newsletter=False,
+        promotional_offers=True,
+    )
+    assert pool.query is not None
+    assert "ON CONFLICT (user_id) DO UPDATE" in pool.query
+    assert "weekly_newsletter = EXCLUDED.weekly_newsletter" in pool.query
+    assert "promotional_offers = EXCLUDED.promotional_offers" in pool.query
+    assert "order_confirmations = EXCLUDED.order_confirmations" not in pool.query
+    assert pool.args == (USER_ID, False, True)
+
+
+def test_patch_notification_preferences_requires_a_non_null_field(
+    monkeypatch: Any,
+) -> None:
+    pool = NotificationPreferencesPool()
+    app = configure_test_app(monkeypatch, pool)
+
+    try:
+        with TestClient(app) as client:
+            empty_response = client.patch("/api/v1/notifications/preferences", json={})
+            null_response = client.patch(
+                "/api/v1/notifications/preferences",
+                json={"delivery_updates": None},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert empty_response.status_code == 422
+    assert null_response.status_code == 422
+    assert pool.query is None
+
+
+def test_notification_preferences_require_authentication(monkeypatch: Any) -> None:
+    app = configure_test_app(
+        monkeypatch,
+        NotificationPreferencesPool(),
+        authenticated=False,
+    )
+
+    try:
+        with TestClient(app) as client:
+            response = client.get("/api/v1/notifications/preferences")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 401
 
 
 def test_send_test_notification_to_current_users_latest_registration(
