@@ -1,7 +1,7 @@
 import asyncio
 from dataclasses import dataclass
 from typing import Any, Protocol
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 
 import boto3
 from botocore.client import Config
@@ -26,6 +26,8 @@ class AssetObjectStorage(Protocol):
     def create_upload_url(self, object_key: str, content_type: str, expires_in: int) -> str: ...
 
     def public_url(self, object_key: str) -> str: ...
+
+    def object_key_from_public_url(self, url: str) -> str | None: ...
 
     async def head_object(self, object_key: str) -> ObjectMetadata: ...
 
@@ -117,6 +119,31 @@ class R2ObjectStorage:
 
     def public_url(self, object_key: str) -> str:
         return f"{self._public_base_url}/{quote(object_key, safe='/')}"
+
+    def object_key_from_public_url(self, url: str) -> str | None:
+        base = urlsplit(self._public_base_url)
+        candidate = urlsplit(url)
+        if (
+            candidate.scheme.casefold() != base.scheme.casefold()
+            or candidate.netloc.casefold() != base.netloc.casefold()
+            or candidate.query
+            or candidate.fragment
+        ):
+            return None
+
+        public_path_prefix = f"{base.path.rstrip('/')}/"
+        if not candidate.path.startswith(public_path_prefix):
+            return None
+
+        encoded_key = candidate.path.removeprefix(public_path_prefix)
+        object_key = unquote(encoded_key)
+        if (
+            not object_key
+            or any(part in {"", ".", ".."} for part in object_key.split("/"))
+            or quote(object_key, safe="/") != encoded_key
+        ):
+            return None
+        return object_key
 
     def _head_object(self, object_key: str) -> ObjectMetadata:
         try:

@@ -4,15 +4,40 @@ from typing import Any
 from uuid import UUID
 
 from backend.apps.admin import auth as admin_auth_module
+from backend.apps.assets import storage as storage_module
 from backend.apps.assets.dependencies import get_asset_storage
 from backend.apps.assets.exceptions import AssetUploadNotFoundError
-from backend.apps.assets.storage import ObjectMetadata
+from backend.apps.assets.storage import ObjectMetadata, R2ObjectStorage
 from backend.config.database import get_pool
 from fastapi.testclient import TestClient
 from PIL import Image
 
 ADMIN_ID = UUID("40000000-0000-0000-0000-000000000001")
 UPLOAD_ID = UUID("50000000-0000-0000-0000-000000000001")
+
+
+def test_r2_storage_extracts_only_canonical_public_object_keys(monkeypatch: Any) -> None:
+    monkeypatch.setattr(storage_module.boto3, "client", lambda **_kwargs: object())
+    storage = R2ObjectStorage(
+        endpoint_url="https://account.r2.cloudflarestorage.com",
+        access_key_id="access-key",
+        secret_access_key="secret-key",
+        bucket_name="assets",
+        public_base_url="https://assets.example.test/cdn",
+    )
+
+    valid_url = "https://assets.example.test/cdn/products/images/image-id.jpg"
+    assert storage.object_key_from_public_url(valid_url) == "products/images/image-id.jpg"
+    assert storage.object_key_from_public_url(f"{valid_url}?version=1") is None
+    assert storage.object_key_from_public_url(
+        "https://assets.example.test/cdn/products/%2E%2E/private.jpg"
+    ) is None
+    assert storage.object_key_from_public_url(
+        "https://assets.example.test/cdn-other/products/images/image-id.jpg"
+    ) is None
+    assert storage.object_key_from_public_url(
+        "https://assets.example.test.evil/cdn/products/images/image-id.jpg"
+    ) is None
 
 
 class DummyPool:

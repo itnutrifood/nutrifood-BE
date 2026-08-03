@@ -1,6 +1,6 @@
 import asyncio
 import warnings
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -167,6 +167,39 @@ async def _delete_invalid_upload(storage: AssetObjectStorage, object_key: str) -
     except AssetStorageUnavailableError:
         # A bucket lifecycle rule removes abandoned pending uploads as a backstop.
         pass
+
+
+async def delete_product_image_urls(
+    storage: AssetObjectStorage,
+    urls: Iterable[str],
+) -> None:
+    # TODO: Enqueue deletions for durable Celery retries once worker infrastructure exists.
+    policy = ASSET_UPLOAD_POLICIES[AssetPurpose.PRODUCT_IMAGE]
+    public_prefix = f"{policy.public_prefix}/"
+    allowed_extensions = frozenset(policy.content_type_extensions.values())
+    object_keys = {
+        object_key
+        for url in urls
+        if (object_key := storage.object_key_from_public_url(url)) is not None
+        and object_key.startswith(public_prefix)
+        and _is_managed_product_image_key(object_key, public_prefix, allowed_extensions)
+    }
+    await asyncio.gather(*(storage.delete_object(object_key) for object_key in object_keys))
+
+
+def _is_managed_product_image_key(
+    object_key: str,
+    public_prefix: str,
+    allowed_extensions: frozenset[str],
+) -> bool:
+    filename = object_key.removeprefix(public_prefix)
+    asset_id, separator, extension = filename.rpartition(".")
+    if not separator or "/" in filename or extension not in allowed_extensions:
+        return False
+    try:
+        return str(UUID(asset_id)) == asset_id
+    except ValueError:
+        return False
 
 
 async def _read_and_validate_asset(

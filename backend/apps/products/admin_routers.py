@@ -4,6 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Query, Response
 from fastapi import status as http_status
 
+from backend.apps.assets.dependencies import AssetStorage
 from backend.apps.products.admin_service import (
     create_product,
     delete_product,
@@ -58,14 +59,16 @@ async def update_admin_product(
     product_id: UUID,
     payload: ProductUpdate,
     pool: DbPool,
+    storage: AssetStorage,
 ) -> ProductRead:
-    return await update_product(pool, product_id, payload)
+    return await update_product(pool, product_id, payload, storage)
 
 
 @router.delete("/{product_id}", status_code=http_status.HTTP_204_NO_CONTENT)
 async def delete_admin_product(
     product_id: UUID,
     pool: DbPool,
+    storage: AssetStorage,
 ) -> Response:
-    await delete_product(pool, product_id)
+    await delete_product(pool, product_id, storage)
     return Response(status_code=http_status.HTTP_204_NO_CONTENT)

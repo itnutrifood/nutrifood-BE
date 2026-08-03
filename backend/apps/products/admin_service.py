@@ -3,6 +3,8 @@ from uuid import UUID
 
 import asyncpg
 
+from backend.apps.assets.service import delete_product_image_urls
+from backend.apps.assets.storage import AssetObjectStorage
 from backend.apps.products import repository
 from backend.apps.products.exceptions import ProductCategoryNotFoundError
 from backend.apps.products.schemas import (
@@ -43,11 +45,28 @@ async def update_product(
     pool: asyncpg.Pool,
     product_id: UUID,
     payload: ProductUpdate,
+    storage: AssetObjectStorage,
 ) -> ProductRead:
     if "category_ids" in payload.model_fields_set:
         await _ensure_categories_exist(pool, payload.category_ids or [])
-    return await repository.update_product(pool, product_id, payload)
+
+    previous_image_urls: set[str] = set()
+    if "images" in payload.model_fields_set:
+        product = await repository.get_product(pool, product_id)
+        previous_image_urls = {image.url for image in product.images}
+
+    updated_product = await repository.update_product(pool, product_id, payload)
+    if "images" in payload.model_fields_set:
+        current_image_urls = {image.url for image in updated_product.images}
+        await delete_product_image_urls(storage, previous_image_urls - current_image_urls)
+    return updated_product
 
 
-async def delete_product(pool: asyncpg.Pool, product_id: UUID) -> None:
+async def delete_product(
+    pool: asyncpg.Pool,
+    product_id: UUID,
+    storage: AssetObjectStorage,
+) -> None:
+    product = await repository.get_product(pool, product_id)
     await repository.delete_product(pool, product_id)
+    await delete_product_image_urls(storage, (image.url for image in product.images))

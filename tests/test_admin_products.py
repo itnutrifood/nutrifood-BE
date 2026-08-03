@@ -5,6 +5,7 @@ from typing import Any
 from uuid import UUID
 
 from backend.apps.admin import auth as admin_auth_module
+from backend.apps.assets.dependencies import get_asset_storage
 from backend.config.database import get_pool
 from fastapi.testclient import TestClient
 
@@ -12,6 +13,12 @@ PRODUCT_ID = UUID("10000000-0000-0000-0000-000000000001")
 CATEGORY_ID = UUID("20000000-0000-0000-0000-000000000001")
 ADMIN_ID = UUID("40000000-0000-0000-0000-000000000001")
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
+ASSET_BASE_URL = "https://assets.example.test"
+EXISTING_ASSET_ID = UUID("50000000-0000-0000-0000-000000000001")
+REMOVED_ASSET_ID = UUID("50000000-0000-0000-0000-000000000002")
+RETAINED_ASSET_ID = UUID("50000000-0000-0000-0000-000000000003")
+NEW_ASSET_ID = UUID("50000000-0000-0000-0000-000000000004")
+EXISTING_IMAGE_URL = f"{ASSET_BASE_URL}/products/images/{EXISTING_ASSET_ID}.jpg"
 
 
 class DummyPool:
@@ -21,6 +28,18 @@ class DummyPool:
 
 async def create_dummy_pool() -> DummyPool:
     return DummyPool()
+
+
+class FakeProductAssetStorage:
+    def __init__(self) -> None:
+        self.deleted: list[str] = []
+
+    def object_key_from_public_url(self, url: str) -> str | None:
+        prefix = f"{ASSET_BASE_URL}/"
+        return url.removeprefix(prefix) if url.startswith(prefix) else None
+
+    async def delete_object(self, object_key: str) -> None:
+        self.deleted.append(object_key)
 
 
 def localized_text(en_us: str) -> dict[str, str]:
@@ -160,21 +179,36 @@ class ListProductPool:
 
 
 class UpdateProductPool:
-    def __init__(self) -> None:
+    def __init__(self, old_images: list[dict[str, int | str]] | None = None) -> None:
         self.update_args: tuple[object, ...] | None = None
+        self.old_images = old_images
 
     async def fetchrow(self, query: str, *args: object) -> dict[str, object] | None:
-        if "UPDATE products" not in query:
-            raise AssertionError(f"Unexpected query: {query}")
+        if "UPDATE products" in query:
+            self.update_args = args
+            if "images =" in query:
+                return product_record(images=str(args[1]))
 
-        self.update_args = args
-        price = args[1] if isinstance(args[1], Decimal) else Decimal(str(args[1]))
-        return product_record(price=price)
+            price = args[1] if isinstance(args[1], Decimal) else Decimal(str(args[1]))
+            return product_record(price=price)
+        if "FROM products AS p" in query:
+            images = json.dumps(self.old_images) if self.old_images is not None else None
+            return product_record(images=images)
+
+        raise AssertionError(f"Unexpected query: {query}")
 
 
 class DeleteProductPool:
-    def __init__(self) -> None:
+    def __init__(self, images: list[dict[str, int | str]] | None = None) -> None:
         self.deleted_product_id: UUID | None = None
+        self.images = images
+
+    async def fetchrow(self, query: str, *args: object) -> dict[str, object] | None:
+        if "FROM products AS p" not in query:
+            raise AssertionError(f"Unexpected query: {query}")
+
+        images = json.dumps(self.images) if self.images is not None else None
+        return product_record(images=images)
 
     async def execute(self, query: str, *args: object) -> str:
         if "DELETE FROM products" not in query:
@@ -184,7 +218,11 @@ class DeleteProductPool:
         return "DELETE 1"
 
 
-def configure_test_app(monkeypatch: Any, pool: object) -> Any:
+def configure_test_app(
+    monkeypatch: Any,
+    pool: object,
+    storage: FakeProductAssetStorage | None = None,
+) -> Any:
     from backend.config import database
     from backend.config.asgi import app
 
@@ -195,6 +233,7 @@ def configure_test_app(monkeypatch: Any, pool: object) -> Any:
         token_version=1,
     )
     app.dependency_overrides[get_pool] = lambda: pool
+    app.dependency_overrides[get_asset_storage] = lambda: storage or FakeProductAssetStorage()
     return app
 
 
@@ -245,7 +284,8 @@ def test_admin_can_list_products_by_category(monkeypatch: Any) -> None:
 
 def test_admin_can_update_product(monkeypatch: Any) -> None:
     pool = UpdateProductPool()
-    app = configure_test_app(monkeypatch, pool)
+    storage = FakeProductAssetStorage()
+    app = configure_test_app(monkeypatch, pool, storage)
 
     try:
         with TestClient(app) as client:
@@ -258,11 +298,53 @@ def test_admin_can_update_product(monkeypatch: Any) -> None:
 
     assert response.status_code == 200
     assert pool.update_args == (PRODUCT_ID, Decimal("10.99"))
+    assert storage.deleted == []
+
+
+def test_admin_update_product_deletes_only_removed_managed_images(monkeypatch: Any) -> None:
+    removed_url = f"{ASSET_BASE_URL}/products/images/{REMOVED_ASSET_ID}.jpg"
+    retained_url = f"{ASSET_BASE_URL}/products/images/{RETAINED_ASSET_ID}.webp"
+    external_url = "https://legacy.example.test/external.jpg"
+    old_images = [
+        {"url": removed_url},
+        {"url": retained_url},
+        {"url": external_url},
+        {"url": f"{ASSET_BASE_URL}/other/file.jpg"},
+        {"url": f"{ASSET_BASE_URL}/products/images/not-managed.jpg"},
+    ]
+    new_images = [
+        {"url": retained_url},
+        {"url": f"{ASSET_BASE_URL}/products/images/{NEW_ASSET_ID}.png"},
+    ]
+    pool = UpdateProductPool(old_images)
+    storage = FakeProductAssetStorage()
+    app = configure_test_app(monkeypatch, pool, storage)
+
+    try:
+        with TestClient(app) as client:
+            response = client.patch(
+                f"/api/v1/admin/products/{PRODUCT_ID}",
+                json={"images": new_images},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert [image["url"] for image in response.json()["images"]] == [
+        retained_url,
+        new_images[1]["url"],
+    ]
+    assert storage.deleted == [f"products/images/{REMOVED_ASSET_ID}.jpg"]
 
 
 def test_admin_delete_product_returns_no_content(monkeypatch: Any) -> None:
-    pool = DeleteProductPool()
-    app = configure_test_app(monkeypatch, pool)
+    images = [
+        {"url": EXISTING_IMAGE_URL},
+        {"url": "https://legacy.example.test/external.jpg"},
+    ]
+    pool = DeleteProductPool(images)
+    storage = FakeProductAssetStorage()
+    app = configure_test_app(monkeypatch, pool, storage)
 
     try:
         with TestClient(app) as client:
@@ -273,6 +355,7 @@ def test_admin_delete_product_returns_no_content(monkeypatch: Any) -> None:
     assert response.status_code == 204
     assert response.content == b""
     assert pool.deleted_product_id == PRODUCT_ID
+    assert storage.deleted == [f"products/images/{EXISTING_ASSET_ID}.jpg"]
 
 
 def test_admin_product_rejects_oversized_image(monkeypatch: Any) -> None:

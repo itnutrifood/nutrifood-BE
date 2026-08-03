@@ -228,6 +228,12 @@ The admin client upload flow is:
    }
    ```
 
+Product image URLs are owned by one product and must not be reused. When an admin replaces a
+product's `images` array, managed R2 objects missing from the new array are deleted. Deleting
+a product also deletes all of its managed `products/images/` objects. Cleanup ignores URLs
+outside the configured R2 public origin, product image prefix, and generated UUID filename
+format.
+
 Presigned URLs are bearer credentials until they expire. Do not log or persist them.
 See [ASSET_UPLOAD_PLAN.md](ASSET_UPLOAD_PLAN.md) for the design rationale and expansion
 roadmap.
