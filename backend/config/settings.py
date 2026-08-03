@@ -40,6 +40,13 @@ class Settings(BaseSettings):
     firebase_require_verified_email: bool = True
     firebase_allowed_sign_in_providers: frozenset[str] = frozenset({"password", "google.com"})
 
+    r2_endpoint_url: str = ""
+    r2_access_key_id: str = ""
+    r2_secret_access_key: str = ""
+    r2_bucket_name: str = ""
+    r2_public_base_url: str = ""
+    r2_upload_url_expire_seconds: int = Field(default=900, ge=60, le=3600)
+
     @property
     def api_root_prefix(self) -> str:
         prefix = self.api_prefix.rstrip("/") or "/api"

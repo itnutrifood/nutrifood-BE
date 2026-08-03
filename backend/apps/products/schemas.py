@@ -34,8 +34,10 @@ ImageUrl = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=2048),
 ]
-ImageDimension = Annotated[int, Field(ge=1, le=4096)]
-ImageSizeBytes = Annotated[int, Field(ge=1, le=5 * 1024 * 1024)]
+MAX_PRODUCT_IMAGE_DIMENSION = 4096
+MAX_PRODUCT_IMAGE_SIZE_BYTES = 5 * 1024 * 1024
+ImageDimension = Annotated[int, Field(ge=1, le=MAX_PRODUCT_IMAGE_DIMENSION)]
+ImageSizeBytes = Annotated[int, Field(ge=1, le=MAX_PRODUCT_IMAGE_SIZE_BYTES)]
 ReadinessTimeMinutes = Annotated[int, Field(ge=1, le=24 * 60)]
 ProductPrice = Annotated[Decimal, Field(ge=Decimal("0"), max_digits=10, decimal_places=2)]
 

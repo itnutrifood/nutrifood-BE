@@ -160,6 +160,78 @@ from backend.apps.accounts.schemas import UserIdentity
 Subscriber = Annotated[UserIdentity, Depends(RoleChecker("subscriber"))]
 ```
 
+## Asset uploads with Cloudflare R2
+
+Assets use global direct browser-to-R2 upload endpoints. Each request includes a `purpose`
+that selects a server-owned policy for allowed media types, size, validation, and object
+prefixes. The first policy is `product_image`: the API creates a short-lived,
+content-type-bound presigned `PUT` URL, verifies the uploaded bytes and dimensions, then
+moves the object from `pending/products/images/` to the public, immutable
+`products/images/` prefix. Supported formats are JPEG, PNG, and WebP; images are limited
+to 5 MiB and 4096 pixels per dimension.
+
+Configure a bucket-scoped R2 Object Read & Write token and a public custom domain:
+
+```sh
+R2_ENDPOINT_URL=https://<account-id>.r2.cloudflarestorage.com
+R2_ACCESS_KEY_ID=<access-key-id>
+R2_SECRET_ACCESS_KEY=<secret-access-key>
+R2_BUCKET_NAME=nutrifood-assets
+R2_PUBLIC_BASE_URL=https://assets.example.com
+R2_UPLOAD_URL_EXPIRE_SECONDS=900
+```
+
+The S3 API endpoint signs uploads; the custom domain serves completed images. For
+production, use a custom domain rather than an `r2.dev` development URL. Add this R2
+CORS policy with the real admin frontend origin:
+
+```json
+[
+  {
+    "AllowedOrigins": ["http://localhost:3000", "https://admin.example.com"],
+    "AllowedMethods": ["PUT"],
+    "AllowedHeaders": ["Content-Type"],
+    "ExposeHeaders": ["ETag"],
+    "MaxAgeSeconds": 3600
+  }
+]
+```
+
+If the custom domain exposes the bucket directly, add a WAF rule that blocks requests
+whose path starts with `/pending/`. Pending keys contain random UUIDs, but blocking the
+prefix ensures incomplete uploads cannot be served from the public domain.
+
+Configure an R2 lifecycle rule to expire objects under `pending/products/images/` after
+one day. Successful completions remove their pending object immediately; the rule cleans
+up uploads that clients abandon.
+
+The admin client upload flow is:
+
+1. `POST /api/v1/admin/assets/uploads` with the browser file's purpose, exact
+   `content_type`, and `size_bytes`:
+
+   ```json
+   {"purpose": "product_image", "content_type": "image/png", "size_bytes": 204800}
+   ```
+
+2. `PUT` the raw file to `upload_url`, sending every header returned in `headers`.
+3. `POST /api/v1/admin/assets/uploads/{upload_id}/complete` with the same `purpose`,
+   `content_type`, and `size_bytes`.
+4. For a product image, map the completed asset to the product contract:
+
+   ```js
+   const productImage = {
+     url: asset.url,
+     width: asset.metadata.width,
+     height: asset.metadata.height,
+     size_bytes: asset.size_bytes,
+   }
+   ```
+
+Presigned URLs are bearer credentials until they expire. Do not log or persist them.
+See [ASSET_UPLOAD_PLAN.md](ASSET_UPLOAD_PLAN.md) for the design rationale and expansion
+roadmap.
+
 Authenticated users can manage their favorite products with locale-scoped endpoints:
 
 - `GET /api/v1/{locale}/favorites`

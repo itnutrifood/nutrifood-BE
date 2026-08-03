@@ -15,6 +15,12 @@ from backend.apps.admin.auth_exceptions import (
     AdminAuthenticationError,
     AdminAuthNotConfiguredError,
 )
+from backend.apps.assets.exceptions import (
+    AssetStorageNotConfiguredError,
+    AssetStorageUnavailableError,
+    AssetUploadNotFoundError,
+    InvalidAssetUploadError,
+)
 from backend.apps.cart.exceptions import CartProductNotFoundError
 from backend.apps.categories.exceptions import (
     CategoryDeleteConflictError,
@@ -69,6 +75,10 @@ DOMAIN_EXCEPTION_TYPES: tuple[type[Exception], ...] = (
     CartProductNotFoundError,
     FavoriteProductNotFoundError,
     FcmRegistrationNotFoundError,
+    AssetStorageNotConfiguredError,
+    AssetStorageUnavailableError,
+    AssetUploadNotFoundError,
+    InvalidAssetUploadError,
 )
 
 
@@ -168,6 +178,23 @@ async def domain_exception_handler(_request: Request, exc: Exception) -> JSONRes
         )
     if isinstance(exc, FcmRegistrationNotFoundError):
         return _not_found("No FCM registration found for the current user")
+    if isinstance(exc, AssetStorageNotConfiguredError):
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"detail": "Asset storage is not configured"},
+        )
+    if isinstance(exc, AssetStorageUnavailableError):
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"detail": "Asset storage is temporarily unavailable"},
+        )
+    if isinstance(exc, AssetUploadNotFoundError):
+        return _not_found("Asset upload not found")
+    if isinstance(exc, InvalidAssetUploadError):
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            content={"detail": exc.detail},
+        )
 
     raise exc
 
