@@ -16,6 +16,7 @@ pyjwt = { extras = ["crypto"], version = "==2.13.0" }
 firebase-admin = "==7.5.0"
 boto3 = "1.43.4"
 pillow = "12.3.0"
+celery = {version = "5.6.3", extras = ["redis"]}
 
 [tool.poetry.group.dev.dependencies]
 httpx = "==0.28.1"
@@ -46,7 +47,16 @@ disallow_untyped_defs = true
 files = ["backend"]
 
 [[tool.mypy.overrides]]
-module = ["asyncpg", "boto3", "botocore", "botocore.*", "firebase_admin", "firebase_admin.*"]
+module = [
+    "asyncpg",
+    "boto3",
+    "botocore",
+    "botocore.*",
+    "celery",
+    "celery.*",
+    "firebase_admin",
+    "firebase_admin.*",
+]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

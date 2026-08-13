@@ -1,4 +1,4 @@
-FROM python:3.14-slim
+FROM python:3.13-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -13,10 +13,16 @@ RUN apt-get update \
     && apt-get purge -y --auto-remove curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml README.md ./
+COPY pyproject.toml poetry.lock README.md ./
 RUN poetry install --only main --no-root --no-ansi
 
-COPY backend ./backend
+RUN groupadd --gid 10001 app \
+    && useradd --no-create-home --uid 10001 --gid app app \
+    && install -d --owner=app --group=app /var/lib/celery
+
+COPY --chown=app:app backend ./backend
+
+USER app
 
 EXPOSE 8000
 

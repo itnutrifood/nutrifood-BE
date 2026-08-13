@@ -1,6 +1,6 @@
 DOCKER_COMPOSE ?= docker compose
 
-.PHONY: help init build up down restart logs ps shell db-shell migrate migrate-status migration seed-admin seed-catalog seed lint format test
+.PHONY: help init build up down restart logs celery-logs celery-status ps shell db-shell migrate migrate-status migration seed-admin seed-catalog seed lint format test
 
 help:
 	@printf "NutriFood commands:\n"
@@ -9,6 +9,8 @@ help:
 	@printf "  make up               Start the stack\n"
 	@printf "  make down             Stop the stack\n"
 	@printf "  make logs             Follow API logs\n"
+	@printf "  make celery-logs      Follow worker, Beat, and Redis logs\n"
+	@printf "  make celery-status    Ping running Celery workers\n"
 	@printf "  make shell            Open a shell in the API container\n"
 	@printf "  make db-shell         Open psql in the database container\n"
 	@printf "  make migrate          Run Goose migrations\n"
@@ -37,6 +39,12 @@ restart: down up
 
 logs:
 	$(DOCKER_COMPOSE) logs -f api
+
+celery-logs:
+	$(DOCKER_COMPOSE) logs -f celery-worker celery-beat redis
+
+celery-status:
+	$(DOCKER_COMPOSE) exec celery-worker celery -A backend.config.celery_app:app inspect ping
 
 ps:
 	$(DOCKER_COMPOSE) ps

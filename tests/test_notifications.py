@@ -90,6 +90,17 @@ class NotificationPreferencesPool:
         return self.record
 
 
+class StaleRegistrationsPool:
+    def __init__(self) -> None:
+        self.query: str | None = None
+        self.args: tuple[object, ...] | None = None
+
+    async def execute(self, query: str, *args: object) -> str:
+        self.query = query
+        self.args = args
+        return "DELETE 3"
+
+
 class FakeFirebaseService:
     def __init__(self) -> None:
         self.message: messaging.Message | None = None
@@ -231,6 +242,20 @@ def test_notification_preferences_require_authentication(monkeypatch: Any) -> No
         app.dependency_overrides.clear()
 
     assert response.status_code == 401
+
+
+async def test_prune_stale_fcm_registrations_uses_configured_cutoff() -> None:
+    from backend.apps.notifications.service import prune_stale_fcm_registrations
+
+    pool = StaleRegistrationsPool()
+
+    removed_count = await prune_stale_fcm_registrations(pool, stale_days=30)  # type: ignore[arg-type]
+
+    assert removed_count == 3
+    assert pool.query is not None
+    assert "DELETE FROM user_fcm_registrations" in pool.query
+    assert "last_seen_at < now() - ($1 * interval '1 day')" in pool.query
+    assert pool.args == (30,)
 
 
 def test_send_test_notification_to_current_users_latest_registration(

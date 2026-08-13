@@ -93,6 +93,44 @@ poetry run uvicorn backend.config.asgi:app --reload
 For local non-Docker database access, set `DATABASE_URL` in `.env` to point to
 your PostgreSQL host.
 
+## Celery and periodic tasks
+
+The Compose stack builds one `nutrifood-backend` image and uses it for the API,
+one Celery worker, and one Celery Beat scheduler. Redis provides queue storage.
+Redis database 0 is the task broker and database 1 is the result backend. Redis is
+not published to the host, persists its data to the `redis-data` volume with AOF,
+and rejects writes instead of evicting queued messages when its configured memory
+limit is reached.
+
+Periodic schedules are defined in `backend/config/celery_schedule.py`. Beat keeps
+its last-run metadata in the `celery-beat-data` volume. Run exactly one Beat
+instance; workers can be scaled independently. Successful task results are ignored,
+failures are retained, and stored results expire after seven days. PostgreSQL remains
+the durable source of truth for business state and task idempotency.
+
+The initial periodic task removes FCM registrations that have not been seen for 30
+days. It runs daily at 03:00 UTC. Configure the cutoff and Celery runtime with:
+
+```sh
+CELERY_BROKER_URL=redis://redis:6379/0
+CELERY_RESULT_BACKEND=redis://redis:6379/1
+CELERY_TIMEZONE=UTC
+CELERY_RESULT_EXPIRES_SECONDS=604800
+CELERY_WORKER_CONCURRENCY=2
+FCM_REGISTRATION_STALE_DAYS=30
+```
+
+Task entry points live in the owning feature's `tasks.py` module and call the
+domain service rather than containing SQL. A worker does not use FastAPI's lifespan
+state, so each task that needs PostgreSQL creates and closes its own `asyncpg` pool.
+
+Inspect the Celery services with:
+
+```sh
+make celery-logs
+make celery-status
+```
+
 ## User authentication
 
 User authentication is managed by Firebase Authentication. Enable these sign-in

@@ -1,5 +1,6 @@
 services:
   api:
+    image: nutrifood-backend
     build:
       context: .
       dockerfile: Dockerfile
@@ -30,6 +31,70 @@ services:
         condition: service_healthy
     restart: "no"
 
+  celery-worker:
+    image: nutrifood-backend
+    env_file:
+      - .env
+    command:
+      - celery
+      - -A
+      - backend.config.celery_app:app
+      - worker
+      - --loglevel=INFO
+      - --queues=default,periodic
+    volumes:
+      - .:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  celery-beat:
+    image: nutrifood-backend
+    env_file:
+      - .env
+    command:
+      - celery
+      - -A
+      - backend.config.celery_app:app
+      - beat
+      - --loglevel=INFO
+      - --schedule=/var/lib/celery/celerybeat-schedule
+    volumes:
+      - .:/app
+      - celery-beat-data:/var/lib/celery
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  redis:
+    image: redis:8.2-alpine
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --maxmemory
+      - 256mb
+      - --maxmemory-policy
+      - noeviction
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
   db:
     image: postgres:17
     env_file:
@@ -46,3 +111,5 @@ services:
 
 volumes:
   postgres-data:
+  redis-data:
+  celery-beat-data:

@@ -5,6 +5,7 @@ from uuid import UUID
 
 import asyncpg
 
+from backend.apps.common.db import rows_affected
 from backend.apps.notifications.schemas import (
     FcmPlatform,
     NotificationPreferencesRead,
@@ -104,6 +105,24 @@ async def remove_registration(
         registration_type,
         user_id,
     )
+
+
+async def delete_stale_registrations(
+    pool: asyncpg.Pool,
+    *,
+    stale_days: int,
+) -> int:
+    command_status = cast(
+        str,
+        await pool.execute(
+            """
+            DELETE FROM user_fcm_registrations
+            WHERE last_seen_at < now() - ($1 * interval '1 day')
+            """,
+            stale_days,
+        ),
+    )
+    return rows_affected(command_status)
 
 
 async def get_latest_registration(

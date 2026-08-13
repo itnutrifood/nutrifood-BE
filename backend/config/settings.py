@@ -28,6 +28,12 @@ class Settings(BaseSettings):
         validation_alias="DATABASE_URL",
     )
 
+    celery_broker_url: str = "redis://redis:6379/0"
+    celery_result_backend: str = "redis://redis:6379/1"
+    celery_timezone: str = "UTC"
+    celery_result_expires_seconds: int = Field(default=604_800, ge=60)
+    celery_worker_concurrency: int = Field(default=2, ge=1)
+
     admin_username: str = ""
     admin_password: str = ""
     admin_token_secret: str = ""
@@ -39,6 +45,7 @@ class Settings(BaseSettings):
     firebase_project_id: str | None = None
     firebase_require_verified_email: bool = True
     firebase_allowed_sign_in_providers: frozenset[str] = frozenset({"password", "google.com"})
+    fcm_registration_stale_days: int = Field(default=30, ge=1)
 
     r2_endpoint_url: str = ""
     r2_access_key_id: str = ""

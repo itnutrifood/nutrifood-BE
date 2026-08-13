@@ -73,6 +73,14 @@ async def remove_fcm_token(
     )
 
 
+async def prune_stale_fcm_registrations(
+    pool: asyncpg.Pool,
+    *,
+    stale_days: int,
+) -> int:
+    return await repository.delete_stale_registrations(pool, stale_days=stale_days)
+
+
 async def send_test_notification(
     pool: asyncpg.Pool,
     firebase_service: FirebaseService,
