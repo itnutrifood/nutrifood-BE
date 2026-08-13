@@ -11,6 +11,7 @@ htmlcov/
 dist/
 build/
 *.egg-info/
+logs/
 .idea/
 .DS_Store
 postgres-data/

@@ -18,7 +18,7 @@ RUN poetry install --only main --no-root --no-ansi
 
 RUN groupadd --gid 10001 app \
     && useradd --no-create-home --uid 10001 --gid app app \
-    && install -d --owner=app --group=app /var/lib/celery
+    && install -d --owner=app --group=app /var/lib/celery /var/log/nutrifood
 
 COPY --chown=app:app backend ./backend
 

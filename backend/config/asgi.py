@@ -3,10 +3,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.config.database import lifespan
 from backend.config.exception_handlers import register_exception_handlers
+from backend.config.logging import configure_logging
 from backend.config.settings import get_settings
 from backend.config.urls import api_router
 
 settings = get_settings()
+configure_logging(settings)
 
 app = FastAPI(
     title=settings.app_name,

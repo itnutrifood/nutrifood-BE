@@ -131,6 +131,37 @@ make celery-logs
 make celery-status
 ```
 
+## Application logs
+
+The API, Celery worker, and Celery Beat write to both the container console and
+daily files. Compose persists the files in the `application-logs` volume at
+`/var/log/nutrifood` and keeps separate `api.log`, `celery-worker.log`, and
+`celery-beat.log` streams. Files rotate at UTC midnight by default, completed
+days are gzip-compressed, and the oldest archives are deleted after the configured
+retention count.
+
+Configure logging in `.env` for native runs:
+
+```sh
+LOG_DIRECTORY=logs
+LOG_COMPONENT=api
+LOG_LEVEL=INFO
+LOG_RETENTION_DAYS=30
+LOG_ROTATION_UTC=true
+```
+
+Compose sets the directory and component per service. Read the persisted files
+through any running application container:
+
+```sh
+docker compose exec api ls -lah /var/log/nutrifood
+docker compose exec api tail -f /var/log/nutrifood/api.log
+```
+
+`docker compose down` preserves the log volume. `docker compose down -v` removes
+it together with the other named volumes. Do not log credentials, authorization
+headers, request bodies, or presigned asset URLs.
+
 ## User authentication
 
 User authentication is managed by Firebase Authentication. Enable these sign-in

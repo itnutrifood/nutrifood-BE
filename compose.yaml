@@ -6,11 +6,15 @@ services:
       dockerfile: Dockerfile
     env_file:
       - .env
+    environment:
+      LOG_COMPONENT: api
+      LOG_DIRECTORY: /var/log/nutrifood
     command: uvicorn backend.config.asgi:app --host 0.0.0.0 --port 8000 --reload
     ports:
       - "8008:8000"
     volumes:
       - .:/app
+      - application-logs:/var/log/nutrifood
     depends_on:
       db:
         condition: service_healthy
@@ -35,6 +39,9 @@ services:
     image: nutrifood-backend
     env_file:
       - .env
+    environment:
+      LOG_COMPONENT: celery-worker
+      LOG_DIRECTORY: /var/log/nutrifood
     command:
       - celery
       - -A
@@ -44,6 +51,7 @@ services:
       - --queues=default,periodic
     volumes:
       - .:/app
+      - application-logs:/var/log/nutrifood
     depends_on:
       db:
         condition: service_healthy
@@ -57,6 +65,9 @@ services:
     image: nutrifood-backend
     env_file:
       - .env
+    environment:
+      LOG_COMPONENT: celery-beat
+      LOG_DIRECTORY: /var/log/nutrifood
     command:
       - celery
       - -A
@@ -67,6 +78,7 @@ services:
     volumes:
       - .:/app
       - celery-beat-data:/var/lib/celery
+      - application-logs:/var/log/nutrifood
     depends_on:
       migrations:
         condition: service_completed_successfully
@@ -113,3 +125,4 @@ volumes:
   postgres-data:
   redis-data:
   celery-beat-data:
+  application-logs:

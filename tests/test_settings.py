@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from backend.apps.assets.exceptions import AssetStorageNotConfiguredError
 from backend.apps.assets.storage import R2ObjectStorage
@@ -46,6 +48,31 @@ def test_celery_settings_are_loaded_from_environment(
     assert settings.celery_result_expires_seconds == 3600
     assert settings.celery_worker_concurrency == 4
     assert settings.fcm_registration_stale_days == 45
+
+
+def test_logging_settings_are_loaded_from_environment(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("LOG_DIRECTORY", str(tmp_path))
+    monkeypatch.setenv("LOG_COMPONENT", "celery-worker")
+    monkeypatch.setenv("LOG_LEVEL", "WARNING")
+    monkeypatch.setenv("LOG_RETENTION_DAYS", "14")
+    monkeypatch.setenv("LOG_ROTATION_UTC", "false")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.log_directory == tmp_path
+    assert settings.log_component == "celery-worker"
+    assert settings.log_level == "WARNING"
+    assert settings.log_retention_days == 14
+    assert settings.log_rotation_utc is False
+
+
+@pytest.mark.parametrize("component", ["../api", "api/log", "API", "api.log", ""])
+def test_logging_component_rejects_unsafe_file_names(component: str) -> None:
+    with pytest.raises(ValueError):
+        Settings(_env_file=None, log_component=component)
 
 
 def test_r2_storage_requires_complete_configuration() -> None:

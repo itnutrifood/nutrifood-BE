@@ -1,9 +1,23 @@
 from celery import Celery
+from celery.signals import setup_logging, worker_process_init
 
 from backend.config.celery_schedule import beat_schedule
+from backend.config.logging import configure_logging
 from backend.config.settings import get_settings
 
 settings = get_settings()
+
+
+def _configure_celery_logging(**_kwargs: object) -> None:
+    configure_logging(settings)
+
+
+def _configure_worker_process_logging(**_kwargs: object) -> None:
+    configure_logging(settings)
+
+
+setup_logging.connect(_configure_celery_logging)
+worker_process_init.connect(_configure_worker_process_logging)
 
 app = Celery(
     "nutrifood",

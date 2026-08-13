@@ -1,6 +1,7 @@
 import re
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -17,6 +18,12 @@ class Settings(BaseSettings):
         "http://localhost:3000",
         "http://localhost:5173",
     )
+
+    log_directory: Path = Path("logs")
+    log_component: str = Field(default="api", pattern=r"^[a-z0-9][a-z0-9_-]*$")
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+    log_retention_days: int = Field(default=30, ge=1, le=3650)
+    log_rotation_utc: bool = True
 
     postgres_db: str = "nutrifood"
     postgres_user: str = "nutrifood"

@@ -10,3 +10,4 @@ __pycache__
 postgres-data
 dist
 build
+logs

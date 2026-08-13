@@ -598,6 +598,24 @@ files = [
 markers = {main = "platform_system == \"Windows\" or sys_platform == \"win32\"", dev = "sys_platform == \"win32\""}
 
 [[package]]
+name = "concurrent-log-handler"
+version = "0.9.29"
+description = "RotatingFileHandler replacement with concurrency, gzip and Windows support. Size and time based rotation."
+optional = false
+python-versions = ">=3.6"
+groups = ["main"]
+files = [
+    {file = "concurrent_log_handler-0.9.29-py3-none-any.whl", hash = "sha256:0d6c077fbaef2dae49a25975dcf72a602fe0a6a4ce80a3b7c37696d37e10459a"},
+    {file = "concurrent_log_handler-0.9.29.tar.gz", hash = "sha256:bc37a76d3f384cbf4a98f693ebd770543edc0f4cd5c6ab6bc70e9e1d7d582265"},
+]
+
+[package.dependencies]
+portalocker = ">=2.6.0"
+
+[package.extras]
+dev = ["black (>=26.1.0)", "coverage", "hatch", "pytest", "pytest-cov", "pytest-mock", "pytest-repeat", "pytest-sugar", "ruff (>=0.15.2)"]
+
+[[package]]
 name = "cryptography"
 version = "48.0.0"
 description = "cryptography is a package which provides cryptographic recipes and primitives to Python developers."
@@ -2063,6 +2081,24 @@ dev = ["pre-commit", "tox"]
 testing = ["coverage", "pytest", "pytest-benchmark"]
 
 [[package]]
+name = "portalocker"
+version = "4.1.0"
+description = "Cross-platform file locking, with Redis, PID-file and bounded-semaphore locks"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = [
+    {file = "portalocker-4.1.0-py3-none-any.whl", hash = "sha256:d985a430d265adf31adf12bc0bf3501aea59efc495e9104c057e5dfb7394c226"},
+    {file = "portalocker-4.1.0.tar.gz", hash = "sha256:91d0ff02d6f5f9a2dbf1ef1367ddb05b83136b2676707a1b2c8746f1f0dcd992"},
+]
+
+[package.extras]
+docs = ["furo", "sphinx (>=7)"]
+redis = ["redis (>=5.0)"]
+tests = ["coverage-conditional-plugin (>=0.9)", "fakeredis (>=2.31.0)", "portalocker[redis]", "pytest (>=5.4.1)", "pytest-cov (>=2.8.1)", "pytest-rerunfailures (>=15.1)", "pytest-timeout (>=2.1.0)", "types-pywin32 (>=310.0.0.20250429)"]
+win32 = ["pywin32 (>=226) ; sys_platform == \"win32\""]
+
+[[package]]
 name = "prompt-toolkit"
 version = "3.0.53"
 description = "Library for building powerful interactive command lines in Python"
@@ -3352,4 +3388,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.13"
-content-hash = "c92ffb9de0ace8b90cf4c1c85f99642a6d3df1849fe05ab72ff3fd1bd4afb398"
+content-hash = "96d0717229e055f1d830e8eaddd33b0893849b78c330dae3c50c03d65c0f45fe"
