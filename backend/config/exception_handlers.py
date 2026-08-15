@@ -46,6 +46,7 @@ from backend.apps.subscriptions.exceptions import (
     SubscriptionPlanNotFoundError,
 )
 from backend.apps.testimonials.exceptions import TestimonialNotFoundError
+from backend.apps.users.addresses.exceptions import AddressNotFoundError
 
 DOMAIN_EXCEPTION_TYPES: tuple[type[Exception], ...] = (
     AuthenticationError,
@@ -75,6 +76,7 @@ DOMAIN_EXCEPTION_TYPES: tuple[type[Exception], ...] = (
     CartProductNotFoundError,
     FavoriteProductNotFoundError,
     FcmRegistrationNotFoundError,
+    AddressNotFoundError,
     AssetStorageNotConfiguredError,
     AssetStorageUnavailableError,
     AssetUploadNotFoundError,
@@ -178,6 +180,8 @@ async def domain_exception_handler(_request: Request, exc: Exception) -> JSONRes
         )
     if isinstance(exc, FcmRegistrationNotFoundError):
         return _not_found("No FCM registration found for the current user")
+    if isinstance(exc, AddressNotFoundError):
+        return _not_found("Address not found")
     if isinstance(exc, AssetStorageNotConfiguredError):
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

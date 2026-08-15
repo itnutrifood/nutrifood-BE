@@ -1,0 +1,2 @@
+class AddressNotFoundError(Exception):
+    pass
