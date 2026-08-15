@@ -50,6 +50,16 @@ def test_celery_settings_are_loaded_from_environment(
     assert settings.fcm_registration_stale_days == 45
 
 
+def test_catalog_currency_is_loaded_and_validated(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CATALOG_CURRENCY", "AMD")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.catalog_currency == "AMD"
+    with pytest.raises(ValueError):
+        Settings(_env_file=None, catalog_currency="usd")
+
+
 def test_logging_settings_are_loaded_from_environment(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

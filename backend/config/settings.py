@@ -34,6 +34,7 @@ class Settings(BaseSettings):
         default="postgresql://nutrifood:nutrifood@db:5432/nutrifood",
         validation_alias="DATABASE_URL",
     )
+    catalog_currency: str = Field(default="USD", pattern=r"^[A-Z]{3}$")
 
     celery_broker_url: str = "redis://redis:6379/0"
     celery_result_backend: str = "redis://redis:6379/1"

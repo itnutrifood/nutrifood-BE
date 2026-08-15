@@ -41,3 +41,25 @@ class SubscriptionPlanStatus(StrEnum):
 class TestimonialStatus(StrEnum):
     ACTIVE = "active"
     INACTIVE = "inactive"
+
+
+class OrderStatus(StrEnum):
+    PENDING = "pending"
+    CONFIRMED = "confirmed"
+    PREPARING = "preparing"
+    READY_FOR_DELIVERY = "ready_for_delivery"
+    OUT_FOR_DELIVERY = "out_for_delivery"
+    DELIVERED = "delivered"
+    CANCELLED = "cancelled"
+
+
+class PaymentMethod(StrEnum):
+    CASH_ON_DELIVERY = "cash_on_delivery"
+    POS = "pos"
+
+
+class PaymentStatus(StrEnum):
+    UNPAID = "unpaid"
+    PAID = "paid"
+    FAILED = "failed"
+    REFUNDED = "refunded"

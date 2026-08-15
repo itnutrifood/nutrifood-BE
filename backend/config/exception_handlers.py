@@ -30,12 +30,18 @@ from backend.apps.categories.exceptions import (
     DuplicateCategorySlugError,
     ParentCategoryNotFoundError,
 )
+from backend.apps.checkout.exceptions import (
+    CheckoutAddressNotFoundError,
+    EmptyCartError,
+    IdempotencyConflictError,
+)
 from backend.apps.common.exceptions import InvalidCursorError
 from backend.apps.contacts.exceptions import ContactMessageNotFoundError
 from backend.apps.faqs.exceptions import DuplicateFAQSlugError, FAQNotFoundError
 from backend.apps.favorites.exceptions import FavoriteProductNotFoundError
 from backend.apps.notifications.exceptions import FcmRegistrationNotFoundError
 from backend.apps.open_positions.exceptions import OpenPositionNotFoundError
+from backend.apps.orders.exceptions import OrderNotFoundError
 from backend.apps.products.exceptions import (
     DuplicateProductSlugError,
     ProductCategoryNotFoundError,
@@ -74,9 +80,13 @@ DOMAIN_EXCEPTION_TYPES: tuple[type[Exception], ...] = (
     TestimonialNotFoundError,
     ContactMessageNotFoundError,
     CartProductNotFoundError,
+    CheckoutAddressNotFoundError,
+    EmptyCartError,
+    IdempotencyConflictError,
     FavoriteProductNotFoundError,
     FcmRegistrationNotFoundError,
     AddressNotFoundError,
+    OrderNotFoundError,
     AssetStorageNotConfiguredError,
     AssetStorageUnavailableError,
     AssetUploadNotFoundError,
@@ -178,10 +188,18 @@ async def domain_exception_handler(_request: Request, exc: Exception) -> JSONRes
                 }
             },
         )
+    if isinstance(exc, CheckoutAddressNotFoundError):
+        return _not_found("Delivery address not found")
+    if isinstance(exc, EmptyCartError):
+        return _conflict("Cannot place an order with an empty cart")
+    if isinstance(exc, IdempotencyConflictError):
+        return _conflict("Idempotency key was already used with a different request")
     if isinstance(exc, FcmRegistrationNotFoundError):
         return _not_found("No FCM registration found for the current user")
     if isinstance(exc, AddressNotFoundError):
         return _not_found("Address not found")
+    if isinstance(exc, OrderNotFoundError):
+        return _not_found("Order not found")
     if isinstance(exc, AssetStorageNotConfiguredError):
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

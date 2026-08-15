@@ -402,6 +402,50 @@ The bulk `PUT` is intended for syncing a locally stored guest cart after login. 
 upserts all supplied quantities atomically and leaves other existing cart items in
 place. Server-side cart endpoints require a Firebase ID token.
 
+## Checkout and orders
+
+Authenticated users place every current cart item in one request. The checkout uses the
+saved delivery address owned by the user and supports cash or a portable card terminal at
+delivery:
+
+```http
+POST /api/v1/checkout/orders
+Authorization: Bearer <firebase-id-token>
+Idempotency-Key: <new-uuid-v4>
+Content-Type: application/json
+
+{
+  "address_id": "<address-uuid>",
+  "payment_method": "cash_on_delivery",
+  "contact_phone": "+37499123456",
+  "delivery_notes": "Call on arrival"
+}
+```
+
+Use `pos` for card-at-delivery. Online payment is intentionally not accepted until a
+merchant integration is available. `Idempotency-Key` is required so a client can safely
+retry after a timeout; reusing it with changed checkout fields returns `409`.
+Successful orders receive a customer-facing number such as `NFUX6Q8N6LD`; UUIDs remain
+the internal API identifiers used in resource URLs.
+
+The server calculates prices from the catalog, creates order and line-item snapshots, and
+clears the purchased cart rows in one database transaction. Address edits, product edits,
+and later product deletion therefore do not rewrite order history. Configure the catalog
+and order currency with `CATALOG_CURRENCY` (an uppercase ISO 4217 code, default `USD`). The
+current product model has no inventory field, so this flow does not claim or decrement
+stock.
+
+Users can read their own order history and details:
+
+- `GET /api/v1/orders`
+- `GET /api/v1/orders/{order_id}`
+
+Admins can see orders across all users, optionally filtered by `status` and
+`payment_method`:
+
+- `GET /api/v1/admin/orders`
+- `GET /api/v1/admin/orders/{order_id}`
+
 Testimonials are managed through `/api/v1/admin/testimonials`. Active testimonials are
 available publicly from `GET /api/v1/testimonials` and `GET /api/v1/testimonials/{id}`.
 
