@@ -19,6 +19,7 @@ ADDRESS_COLUMNS = """
     building_number,
     entrance,
     floor,
+    is_default,
     created_at,
     updated_at
 """
@@ -34,19 +35,20 @@ def address_from_record(record: Mapping[str, object]) -> AddressRead:
         building_number=cast(str, record["building_number"]),
         entrance=cast(str | None, record["entrance"]),
         floor=cast(str | None, record["floor"]),
+        is_default=cast(bool, record["is_default"]),
         created_at=cast(datetime, record["created_at"]),
         updated_at=cast(datetime, record["updated_at"]),
     )
 
 
-async def create_address(
-    pool: asyncpg.Pool,
+async def _insert_address(
+    connection: asyncpg.Connection | asyncpg.Pool,
     user_id: UUID,
     payload: AddressCreate,
 ) -> AddressRead:
     row = cast(
         Mapping[str, object] | None,
-        await pool.fetchrow(
+        await connection.fetchrow(
             f"""
             INSERT INTO user_addresses (
                 user_id,
@@ -56,9 +58,10 @@ async def create_address(
                 street,
                 building_number,
                 entrance,
-                floor
+                floor,
+                is_default
             )
-            VALUES ($1, $2, $3::armenia_region, $4, $5, $6, $7, $8)
+            VALUES ($1, $2, $3::armenia_region, $4, $5, $6, $7, $8, $9)
             RETURNING {ADDRESS_COLUMNS}
             """,
             user_id,
@@ -69,11 +72,43 @@ async def create_address(
             payload.building_number,
             payload.entrance,
             payload.floor,
+            payload.is_default,
         ),
     )
     if row is None:
         raise RuntimeError("Address insert did not return a row")
     return address_from_record(row)
+
+
+async def _lock_default_address_changes(
+    connection: asyncpg.Connection,
+    user_id: UUID,
+) -> None:
+    await connection.fetchval(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))",
+        user_id,
+    )
+
+
+async def create_address(
+    pool: asyncpg.Pool,
+    user_id: UUID,
+    payload: AddressCreate,
+) -> AddressRead:
+    if not payload.is_default:
+        return await _insert_address(pool, user_id, payload)
+
+    async with pool.acquire() as connection, connection.transaction():
+        await _lock_default_address_changes(connection, user_id)
+        await connection.execute(
+            """
+            UPDATE user_addresses
+            SET is_default = FALSE
+            WHERE user_id = $1 AND is_default
+            """,
+            user_id,
+        )
+        return await _insert_address(connection, user_id, payload)
 
 
 async def list_addresses(pool: asyncpg.Pool, user_id: UUID) -> list[AddressRead]:
@@ -114,8 +149,8 @@ async def get_address(
     return address_from_record(row)
 
 
-async def update_address(
-    pool: asyncpg.Pool,
+async def _update_address(
+    connection: asyncpg.Connection | asyncpg.Pool,
     user_id: UUID,
     address_id: UUID,
     payload: AddressUpdate,
@@ -133,11 +168,14 @@ async def update_address(
         if field_name in payload.model_fields_set:
             params.append(getattr(payload, field_name))
             assignments.append(f"{field_name} = ${len(params)}")
+    if "is_default" in payload.model_fields_set:
+        params.append(cast(bool, payload.is_default))
+        assignments.append(f"is_default = ${len(params)}")
 
     params.extend([address_id, user_id])
     row = cast(
         Mapping[str, object] | None,
-        await pool.fetchrow(
+        await connection.fetchrow(
             f"""
             UPDATE user_addresses
             SET {", ".join(assignments)}
@@ -150,6 +188,29 @@ async def update_address(
     if row is None:
         raise AddressNotFoundError
     return address_from_record(row)
+
+
+async def update_address(
+    pool: asyncpg.Pool,
+    user_id: UUID,
+    address_id: UUID,
+    payload: AddressUpdate,
+) -> AddressRead:
+    if payload.is_default is not True:
+        return await _update_address(pool, user_id, address_id, payload)
+
+    async with pool.acquire() as connection, connection.transaction():
+        await _lock_default_address_changes(connection, user_id)
+        await connection.execute(
+            """
+            UPDATE user_addresses
+            SET is_default = FALSE
+            WHERE user_id = $1 AND id <> $2 AND is_default
+            """,
+            user_id,
+            address_id,
+        )
+        return await _update_address(connection, user_id, address_id, payload)
 
 
 async def delete_address(

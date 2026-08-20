@@ -45,10 +45,22 @@ def address_record(**overrides: object) -> dict[str, object]:
         "building_number": "10/1",
         "entrance": "2",
         "floor": "5",
+        "is_default": False,
         "created_at": NOW,
         "updated_at": NOW,
         **overrides,
     }
+
+
+class AsyncContext:
+    def __init__(self, value: object) -> None:
+        self.value = value
+
+    async def __aenter__(self) -> object:
+        return self.value
+
+    async def __aexit__(self, *_args: object) -> None:
+        return None
 
 
 class AddressPool:
@@ -64,6 +76,21 @@ class AddressPool:
         self.fetchrow_args: tuple[object, ...] | None = None
         self.fetch_args: tuple[object, ...] | None = None
         self.delete_args: tuple[object, ...] | None = None
+        self.cleared_default_args: tuple[object, ...] | None = None
+        self.advisory_lock_count = 0
+        self.transaction_count = 0
+
+    def acquire(self) -> AsyncContext:
+        return AsyncContext(self)
+
+    def transaction(self) -> AsyncContext:
+        self.transaction_count += 1
+        return AsyncContext(self)
+
+    async def fetchval(self, query: str, *args: object) -> None:
+        assert "pg_advisory_xact_lock" in query
+        assert args == (USER_ID,)
+        self.advisory_lock_count += 1
 
     async def fetchrow(self, query: str, *args: object) -> dict[str, object] | None:
         self.fetchrow_query = query
@@ -80,9 +107,17 @@ class AddressPool:
                 building_number=args[5],
                 entrance=args[6],
                 floor=args[7],
+                is_default=args[8],
             )
         if "UPDATE user_addresses" in query:
-            return {**self.record, "city": args[0], "entrance": args[1]}
+            updated_record = dict(self.record)
+            if "city = $1" in query:
+                updated_record["city"] = args[0]
+            if "entrance = $2" in query:
+                updated_record["entrance"] = args[1]
+            if "is_default = $1" in query:
+                updated_record["is_default"] = args[0]
+            return updated_record
         if "FROM user_addresses" in query:
             return self.record
         raise AssertionError(f"Unexpected query: {query}")
@@ -95,6 +130,9 @@ class AddressPool:
         return [self.record]
 
     async def execute(self, query: str, *args: object) -> str:
+        if "SET is_default = FALSE" in query:
+            self.cleared_default_args = args
+            return "UPDATE 1"
         assert query == "DELETE FROM user_addresses WHERE id = $1 AND user_id = $2"
         self.delete_args = args
         return "DELETE 1" if self.address_exists else "DELETE 0"
@@ -134,6 +172,7 @@ def test_create_address_defaults_country_to_armenia_and_trims_text(monkeypatch: 
     assert response.status_code == 201
     assert response.json()["country"] == "Armenia"
     assert response.json()["region"] == "Yerevan"
+    assert response.json()["is_default"] is False
     assert pool.fetchrow_query is not None
     assert "$3::armenia_region" in pool.fetchrow_query
     assert pool.fetchrow_args == (
@@ -145,7 +184,34 @@ def test_create_address_defaults_country_to_armenia_and_trims_text(monkeypatch: 
         "10/1",
         "2",
         "5",
+        False,
     )
+
+
+def test_create_default_address_replaces_previous_default(monkeypatch: Any) -> None:
+    pool = AddressPool()
+    app = configure_test_app(monkeypatch, pool)
+
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/users/addresses",
+                json={
+                    "region": "Yerevan",
+                    "city": "Yerevan",
+                    "street": "Northern Avenue",
+                    "building_number": "10/1",
+                    "is_default": True,
+                },
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 201
+    assert response.json()["is_default"] is True
+    assert pool.advisory_lock_count == 1
+    assert pool.transaction_count == 1
+    assert pool.cleared_default_args == (USER_ID,)
 
 
 def test_create_address_rejects_other_countries_invalid_regions_and_delivery_notes(
@@ -238,6 +304,29 @@ def test_patch_address_updates_provided_fields_and_can_clear_optional_fields(
     assert pool.fetchrow_args == ("Gyumri", None, ADDRESS_ID, USER_ID)
 
 
+def test_patch_address_as_default_replaces_previous_default(monkeypatch: Any) -> None:
+    pool = AddressPool()
+    app = configure_test_app(monkeypatch, pool)
+
+    try:
+        with TestClient(app) as client:
+            response = client.patch(
+                f"/api/v1/users/addresses/{ADDRESS_ID}",
+                json={"is_default": True},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["is_default"] is True
+    assert pool.advisory_lock_count == 1
+    assert pool.transaction_count == 1
+    assert pool.cleared_default_args == (USER_ID, ADDRESS_ID)
+    assert pool.fetchrow_query is not None
+    assert "SET is_default = $1" in pool.fetchrow_query
+    assert pool.fetchrow_args == (True, ADDRESS_ID, USER_ID)
+
+
 def test_patch_address_rejects_empty_payload_and_null_required_field(monkeypatch: Any) -> None:
     pool = AddressPool()
     app = configure_test_app(monkeypatch, pool)
@@ -249,11 +338,16 @@ def test_patch_address_rejects_empty_payload_and_null_required_field(monkeypatch
                 f"/api/v1/users/addresses/{ADDRESS_ID}",
                 json={"street": None},
             )
+            null_default_response = client.patch(
+                f"/api/v1/users/addresses/{ADDRESS_ID}",
+                json={"is_default": None},
+            )
     finally:
         app.dependency_overrides.clear()
 
     assert empty_response.status_code == 422
     assert null_response.status_code == 422
+    assert null_default_response.status_code == 422
     assert pool.fetchrow_query is None
 
 

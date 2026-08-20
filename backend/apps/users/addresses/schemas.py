@@ -26,6 +26,7 @@ class AddressCreate(BaseModel):
     building_number: BuildingNumber
     entrance: Entrance | None = None
     floor: Floor | None = None
+    is_default: bool = False
 
 
 class AddressUpdate(BaseModel):
@@ -38,13 +39,21 @@ class AddressUpdate(BaseModel):
     building_number: BuildingNumber | None = None
     entrance: Entrance | None = None
     floor: Floor | None = None
+    is_default: bool | None = None
 
     @model_validator(mode="after")
     def validate_patch(self) -> Self:
         if not self.model_fields_set:
             raise ValueError("At least one field must be provided")
 
-        required_fields = {"country", "region", "city", "street", "building_number"}
+        required_fields = {
+            "country",
+            "region",
+            "city",
+            "street",
+            "building_number",
+            "is_default",
+        }
         for field_name in self.model_fields_set.intersection(required_fields):
             if getattr(self, field_name) is None:
                 raise ValueError(f"{field_name} cannot be null")
@@ -61,5 +70,6 @@ class AddressRead(BaseModel):
     building_number: str
     entrance: str | None
     floor: str | None
+    is_default: bool
     created_at: datetime
     updated_at: datetime
