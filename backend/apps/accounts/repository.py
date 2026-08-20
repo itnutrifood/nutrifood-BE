@@ -152,14 +152,14 @@ async def sync_user_profile(
             await pool.fetchrow(
                 f"""
                 UPDATE users
-                SET email = $2,
-                    first_name = COALESCE(first_name, $3),
-                    last_name = COALESCE(last_name, $4)
+                SET email = $2::varchar,
+                    first_name = COALESCE(first_name, $3::varchar),
+                    last_name = COALESCE(last_name, $4::varchar)
                 WHERE id = $1
                   AND (
-                      email IS DISTINCT FROM $2
-                      OR (first_name IS NULL AND $3 IS NOT NULL)
-                      OR (last_name IS NULL AND $4 IS NOT NULL)
+                      email IS DISTINCT FROM $2::varchar
+                      OR (first_name IS NULL AND $3::varchar IS NOT NULL)
+                      OR (last_name IS NULL AND $4::varchar IS NOT NULL)
                   )
                 RETURNING {USER_COLUMNS}
                 """,

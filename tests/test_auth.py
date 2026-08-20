@@ -87,6 +87,8 @@ class FirebaseAuthPool:
         self.record = user_record() if record is None else record
         self.created_args: tuple[object, ...] | None = None
         self.linked_args: tuple[object, ...] | None = None
+        self.synced_query: str | None = None
+        self.synced_args: tuple[object, ...] | None = None
 
     async def fetchrow(self, query: str, *args: object) -> dict[str, object] | None:
         if "WHERE firebase_uid = $1" in query:
@@ -115,6 +117,8 @@ class FirebaseAuthPool:
             return self.record
 
         if "SET email = $2" in query:
+            self.synced_query = query
+            self.synced_args = args
             # The real query returns no row when the Firebase profile is unchanged.
             return None
 
@@ -275,6 +279,10 @@ def test_later_login_does_not_change_registration_provider(monkeypatch: Any) -> 
     assert response.json()["registration_provider"] == "password"
     assert pool.record is not None
     assert pool.record["registration_provider"] == "password"
+    assert pool.synced_args == (USER_ID, USER_EMAIL, "Jane", "Doe")
+    assert pool.synced_query is not None
+    assert "$3::varchar IS NOT NULL" in pool.synced_query
+    assert "$4::varchar IS NOT NULL" in pool.synced_query
 
 
 def test_accounts_me_requires_bearer_token(monkeypatch: Any) -> None:
