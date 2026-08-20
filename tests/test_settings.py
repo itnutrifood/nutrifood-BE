@@ -38,6 +38,7 @@ def test_celery_settings_are_loaded_from_environment(
     monkeypatch.setenv("CELERY_TIMEZONE", "Asia/Yerevan")
     monkeypatch.setenv("CELERY_RESULT_EXPIRES_SECONDS", "3600")
     monkeypatch.setenv("CELERY_WORKER_CONCURRENCY", "4")
+    monkeypatch.setenv("STATISTICS_CACHE_URL", "redis://cache.example.test:6379/4")
     monkeypatch.setenv("FCM_REGISTRATION_STALE_DAYS", "45")
 
     settings = Settings(_env_file=None)
@@ -47,6 +48,7 @@ def test_celery_settings_are_loaded_from_environment(
     assert settings.celery_timezone == "Asia/Yerevan"
     assert settings.celery_result_expires_seconds == 3600
     assert settings.celery_worker_concurrency == 4
+    assert settings.statistics_cache_url == "redis://cache.example.test:6379/4"
     assert settings.fcm_registration_stale_days == 45
 
 

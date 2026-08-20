@@ -23,7 +23,10 @@ app = Celery(
     "nutrifood",
     broker=settings.celery_broker_url,
     backend=settings.celery_result_backend,
-    include=("backend.apps.notifications.tasks",),
+    include=(
+        "backend.apps.notifications.tasks",
+        "backend.apps.statistics.tasks",
+    ),
 )
 app.conf.update(
     accept_content=("json",),
@@ -40,6 +43,7 @@ app.conf.update(
     task_ignore_result=True,
     task_routes={
         "backend.apps.notifications.tasks.*": {"queue": "periodic"},
+        "backend.apps.statistics.tasks.*": {"queue": "periodic"},
     },
     task_serializer="json",
     task_store_errors_even_if_ignored=True,

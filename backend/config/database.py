@@ -4,13 +4,16 @@ from typing import Annotated, TypedDict, cast
 
 import asyncpg
 from fastapi import Depends, FastAPI, Request
+from redis.asyncio import Redis
 
+from backend.config.cache import create_cache_client
 from backend.config.firebase import FirebaseService, create_firebase_service
 from backend.config.settings import get_settings
 
 
 class AppState(TypedDict):
     db_pool: asyncpg.Pool
+    cache_client: Redis
     firebase_service: FirebaseService
 
 
@@ -22,10 +25,12 @@ async def create_pool() -> asyncpg.Pool:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     pool = await create_pool()
+    cache_client = create_cache_client()
     firebase_service: FirebaseService | None = None
     try:
         firebase_service = create_firebase_service()
         app.state.db_pool = pool
+        app.state.cache_client = cache_client
         app.state.firebase_service = firebase_service
         yield
     finally:
@@ -33,7 +38,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             if firebase_service is not None:
                 firebase_service.close()
         finally:
-            await pool.close()
+            try:
+                await cache_client.aclose()
+            finally:
+                await pool.close()
 
 
 def get_pool(request: Request) -> asyncpg.Pool:

@@ -97,10 +97,10 @@ your PostgreSQL host.
 
 The Compose stack builds one `nutrifood-backend` image and uses it for the API,
 one Celery worker, and one Celery Beat scheduler. Redis provides queue storage.
-Redis database 0 is the task broker and database 1 is the result backend. Redis is
-not published to the host, persists its data to the `redis-data` volume with AOF,
-and rejects writes instead of evicting queued messages when its configured memory
-limit is reached.
+Redis database 0 is the task broker, database 1 is the result backend, and database 2
+stores public statistics. Redis is not published to the host, persists its data to the
+`redis-data` volume with AOF, and rejects writes instead of evicting queued messages
+when its configured memory limit is reached.
 
 Periodic schedules are defined in `backend/config/celery_schedule.py`. Beat keeps
 its last-run metadata in the `celery-beat-data` volume. Run exactly one Beat
@@ -109,16 +109,24 @@ failures are retained, and stored results expire after seven days. PostgreSQL re
 the durable source of truth for business state and task idempotency.
 
 The initial periodic task removes FCM registrations that have not been seen for 30
-days. It runs daily at 03:00 UTC. Configure the cutoff and Celery runtime with:
+days. It runs daily at 03:00 UTC. A second task refreshes the public statistics cache
+daily at 00:00 UTC. Configure the cache and Celery runtime with:
 
 ```sh
 CELERY_BROKER_URL=redis://redis:6379/0
 CELERY_RESULT_BACKEND=redis://redis:6379/1
+STATISTICS_CACHE_URL=redis://redis:6379/2
 CELERY_TIMEZONE=UTC
 CELERY_RESULT_EXPIRES_SECONDS=604800
 CELERY_WORKER_CONCURRENCY=2
 FCM_REGISTRATION_STALE_DAYS=30
 ```
+
+`GET /api/v1/statistics` returns `happy_customers` (order count), `healty_meals`
+(product count), and `customer_rating` (the active-testimonial average, rounded to one
+decimal place). If any cache key is absent or invalid, the API recomputes all three
+values from PostgreSQL, repopulates Redis, and returns the fresh values. A Redis outage
+does not prevent the database-backed response.
 
 Task entry points live in the owning feature's `tasks.py` module and call the
 domain service rather than containing SQL. A worker does not use FastAPI's lifespan

@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     celery_timezone: str = "UTC"
     celery_result_expires_seconds: int = Field(default=604_800, ge=60)
     celery_worker_concurrency: int = Field(default=2, ge=1)
+    statistics_cache_url: str = "redis://redis:6379/2"
 
     admin_username: str = ""
     admin_password: str = ""
