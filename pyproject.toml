@@ -18,6 +18,7 @@ boto3 = "1.43.4"
 pillow = "12.3.0"
 celery = {version = "5.6.3", extras = ["redis"]}
 concurrent-log-handler = "==0.9.29"
+sendgrid = "6.12.5"
 
 [tool.poetry.group.dev.dependencies]
 httpx = "==0.28.1"
@@ -57,6 +58,8 @@ module = [
     "celery.*",
     "firebase_admin",
     "firebase_admin.*",
+    "sendgrid",
+    "sendgrid.*",
 ]
 ignore_missing_imports = true
 

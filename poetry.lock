@@ -2500,6 +2500,18 @@ files = [
 cli = ["click (>=5.0)"]
 
 [[package]]
+name = "python-http-client"
+version = "3.3.7"
+description = "HTTP REST client, simplified for Python"
+optional = false
+python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*"
+groups = ["main"]
+files = [
+    {file = "python_http_client-3.3.7-py3-none-any.whl", hash = "sha256:ad371d2bbedc6ea15c26179c6222a78bc9308d272435ddf1d5c84f068f249a36"},
+    {file = "python_http_client-3.3.7.tar.gz", hash = "sha256:bf841ee45262747e00dec7ee9971dfb8c7d83083f5713596488d67739170cea0"},
+]
+
+[[package]]
 name = "python-multipart"
 version = "0.0.30"
 description = "A streaming multipart parser for Python"
@@ -2878,6 +2890,23 @@ botocore = ">=1.37.4,<2.0a0"
 
 [package.extras]
 crt = ["botocore[crt] (>=1.37.4,<2.0a0)"]
+
+[[package]]
+name = "sendgrid"
+version = "6.12.5"
+description = "Twilio SendGrid library for Python"
+optional = false
+python-versions = "!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,!=3.4.*,>=2.7"
+groups = ["main"]
+files = [
+    {file = "sendgrid-6.12.5-py3-none-any.whl", hash = "sha256:96f92cc91634bf552fdb766b904bbb53968018da7ae41fdac4d1090dc0311ca8"},
+    {file = "sendgrid-6.12.5.tar.gz", hash = "sha256:ea9aae30cd55c332e266bccd11185159482edfc07c149b6cd15cf08869fabdb7"},
+]
+
+[package.dependencies]
+cryptography = ">=45.0.6"
+python-http-client = ">=3.2.1"
+werkzeug = {version = ">=2.3.5", markers = "python_version >= \"3.12\""}
 
 [[package]]
 name = "sentry-sdk"
@@ -3385,7 +3414,25 @@ files = [
     {file = "websockets-16.0.tar.gz", hash = "sha256:5f6261a5e56e8d5c42a4497b364ea24d94d9563e8fbd44e78ac40879c60179b5"},
 ]
 
+[[package]]
+name = "werkzeug"
+version = "3.1.8"
+description = "The comprehensive WSGI web application library."
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "werkzeug-3.1.8-py3-none-any.whl", hash = "sha256:63a77fb8892bf28ebc3178683445222aa500e48ebad5ec77b0ad80f8726b1f50"},
+    {file = "werkzeug-3.1.8.tar.gz", hash = "sha256:9bad61a4268dac112f1c5cd4630a56ede601b6ed420300677a869083d70a4c44"},
+]
+
+[package.dependencies]
+markupsafe = ">=2.1.1"
+
+[package.extras]
+watchdog = ["watchdog (>=2.3)"]
+
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.13"
-content-hash = "96d0717229e055f1d830e8eaddd33b0893849b78c330dae3c50c03d65c0f45fe"
+content-hash = "3874f5e64f001742536ae995ac088ae5d5d73e33492e60117b7677c0277750af"

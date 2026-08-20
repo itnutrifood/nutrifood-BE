@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     firebase_allowed_sign_in_providers: frozenset[str] = frozenset({"password", "google.com"})
     fcm_registration_stale_days: int = Field(default=30, ge=1)
 
+    sendgrid_api_key: str = ""
+    sendgrid_from_email: str = ""
+
     r2_endpoint_url: str = ""
     r2_access_key_id: str = ""
     r2_secret_access_key: str = ""
