@@ -1,5 +1,6 @@
 import json
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, cast
@@ -8,7 +9,7 @@ from uuid import UUID
 import asyncpg
 
 from backend.apps.common.db import json_array, json_object, rows_affected
-from backend.apps.common.enums import CategoryStatus
+from backend.apps.common.enums import CategoryStatus, LanguageCode
 from backend.apps.common.pagination import page_count, page_offset
 from backend.apps.products.exceptions import (
     DuplicateProductSlugError,
@@ -48,6 +49,47 @@ PRODUCT_COLUMNS = """
         WHERE pc.product_id = p.id
     ) AS category_ids
 """
+
+
+@dataclass(frozen=True)
+class ProductSearchConfiguration:
+    title_key: str
+    vector_column: str
+    text_search_configuration: str
+
+
+@dataclass(frozen=True)
+class ProductSearchPosition:
+    exact_title_rank: int
+    title_match_rank: int
+    search_rank: Decimal
+    created_at: datetime
+    id: UUID
+
+
+@dataclass(frozen=True)
+class ProductSearchResult:
+    product: ProductRead
+    position: ProductSearchPosition
+
+
+PRODUCT_SEARCH_CONFIGURATIONS: Mapping[LanguageCode, ProductSearchConfiguration] = {
+    LanguageCode.HY_AM: ProductSearchConfiguration(
+        title_key=LanguageCode.HY_AM.value,
+        vector_column="search_vector_hy_am",
+        text_search_configuration="pg_catalog.armenian",
+    ),
+    LanguageCode.EN_US: ProductSearchConfiguration(
+        title_key=LanguageCode.EN_US.value,
+        vector_column="search_vector_en_us",
+        text_search_configuration="pg_catalog.english",
+    ),
+    LanguageCode.RU_RU: ProductSearchConfiguration(
+        title_key=LanguageCode.RU_RU.value,
+        vector_column="search_vector_ru_ru",
+        text_search_configuration="pg_catalog.russian",
+    ),
+}
 
 
 def _localized_text_db_value(value: OptionalLocalizedText | None) -> dict[str, str]:
@@ -421,6 +463,148 @@ async def list_public_products(
         ),
     )
     return [product_from_record(row) for row in rows]
+
+
+async def search_public_products(
+    pool: asyncpg.Pool,
+    language: LanguageCode,
+    search: str,
+    category_id: UUID | None,
+    limit: int,
+    cursor: ProductSearchPosition | None,
+) -> list[ProductSearchResult]:
+    configuration = PRODUCT_SEARCH_CONFIGURATIONS[language]
+    params: list[object] = [search]
+    conditions = [f"p.{configuration.vector_column} @@ search_query.query"]
+
+    if category_id is not None:
+        params.append(category_id)
+        category_id_param = len(params)
+        params.append(CategoryStatus.ACTIVE.value)
+        status_param = len(params)
+        conditions.append(
+            f"""
+            EXISTS (
+                SELECT 1
+                FROM product_categories AS pc
+                INNER JOIN categories AS c ON c.id = pc.category_id
+                WHERE pc.product_id = p.id
+                    AND pc.category_id = ${category_id_param}
+                    AND c.status = ${status_param}::category_status
+            )
+            """
+        )
+
+    cursor_where_clause = ""
+    if cursor is not None:
+        params.extend(
+            [
+                cursor.exact_title_rank,
+                cursor.title_match_rank,
+                cursor.search_rank,
+                cursor.created_at,
+                cursor.id,
+            ]
+        )
+        exact_title_param = len(params) - 4
+        title_match_param = len(params) - 3
+        search_rank_param = len(params) - 2
+        created_at_param = len(params) - 1
+        id_param = len(params)
+        cursor_where_clause = f"""
+            WHERE p.exact_title_rank < ${exact_title_param}
+                OR (
+                    p.exact_title_rank = ${exact_title_param}
+                    AND p.title_match_rank < ${title_match_param}
+                )
+                OR (
+                    p.exact_title_rank = ${exact_title_param}
+                    AND p.title_match_rank = ${title_match_param}
+                    AND p.search_rank < ${search_rank_param}
+                )
+                OR (
+                    p.exact_title_rank = ${exact_title_param}
+                    AND p.title_match_rank = ${title_match_param}
+                    AND p.search_rank = ${search_rank_param}
+                    AND p.created_at < ${created_at_param}
+                )
+                OR (
+                    p.exact_title_rank = ${exact_title_param}
+                    AND p.title_match_rank = ${title_match_param}
+                    AND p.search_rank = ${search_rank_param}
+                    AND p.created_at = ${created_at_param}
+                    AND p.id > ${id_param}
+                )
+        """
+
+    params.append(limit + 1)
+    rows = cast(
+        Sequence[Mapping[str, object]],
+        await pool.fetch(
+            f"""
+            WITH search_query AS (
+                SELECT websearch_to_tsquery(
+                    '{configuration.text_search_configuration}'::regconfig,
+                    $1
+                ) AS query
+            ),
+            ranked_products AS (
+                SELECT
+                    {PRODUCT_COLUMNS},
+                    CASE
+                        WHEN lower(btrim(COALESCE(p.title ->> '{configuration.title_key}', '')))
+                            = lower($1)
+                        THEN 1
+                        ELSE 0
+                    END AS exact_title_rank,
+                    CASE
+                        WHEN to_tsvector(
+                            '{configuration.text_search_configuration}'::regconfig,
+                            COALESCE(p.title ->> '{configuration.title_key}', '')
+                        ) @@ search_query.query
+                        THEN 1
+                        ELSE 0
+                    END AS title_match_rank,
+                    round(
+                        ts_rank_cd(
+                            p.{configuration.vector_column},
+                            search_query.query,
+                            32
+                        )::numeric,
+                        6
+                    ) AS search_rank
+                FROM products AS p
+                CROSS JOIN search_query
+                WHERE {" AND ".join(conditions)}
+            )
+            SELECT *
+            FROM ranked_products AS p
+            {cursor_where_clause}
+            ORDER BY
+                p.exact_title_rank DESC,
+                p.title_match_rank DESC,
+                p.search_rank DESC,
+                p.created_at DESC,
+                p.id
+            LIMIT ${len(params)}
+            """,
+            *params,
+        ),
+    )
+
+    return [
+        ProductSearchResult(
+            product=product_from_record(row),
+            position=ProductSearchPosition(
+                exact_title_rank=cast(int, row["exact_title_rank"]),
+                title_match_rank=cast(int, row["title_match_rank"]),
+                search_rank=cast(Decimal, row["search_rank"]),
+                created_at=cast(datetime, row["created_at"]),
+                id=cast(UUID, row["id"]),
+            ),
+        )
+        for row in rows
+    ]
 
 
 async def get_public_product(pool: asyncpg.Pool, product_id: UUID) -> ProductRead:

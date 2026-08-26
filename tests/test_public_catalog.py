@@ -4,6 +4,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
+import pytest
 from backend.apps.common.pagination import decode_cursor, encode_cursor
 from backend.config.database import get_pool
 from fastapi.testclient import TestClient
@@ -11,6 +12,7 @@ from fastapi.testclient import TestClient
 CATEGORY_ID = UUID("00000000-0000-0000-0000-000000000001")
 NEXT_CATEGORY_ID = UUID("00000000-0000-0000-0000-000000000002")
 PRODUCT_ID = UUID("10000000-0000-0000-0000-000000000001")
+NEXT_PRODUCT_ID = UUID("10000000-0000-0000-0000-000000000002")
 SUBSCRIPTION_PLAN_ID = UUID("30000000-0000-0000-0000-000000000001")
 NEXT_SUBSCRIPTION_PLAN_ID = UUID("30000000-0000-0000-0000-000000000002")
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
@@ -60,11 +62,16 @@ def category_record(
     }
 
 
-def product_record() -> dict[str, object]:
+def product_record(
+    *,
+    product_id: UUID = PRODUCT_ID,
+    slug: str = "mediterranean-bowl",
+    title: str = "Mediterranean Bowl",
+) -> dict[str, object]:
     return {
-        "id": PRODUCT_ID,
-        "slug": "mediterranean-bowl",
-        "title": json.dumps(localized_text("Mediterranean Bowl")),
+        "id": product_id,
+        "slug": slug,
+        "title": json.dumps(localized_text(title)),
         "description": json.dumps(localized_text("Fresh bowl")),
         "images": json.dumps(
             [
@@ -87,6 +94,23 @@ def product_record() -> dict[str, object]:
         "created_at": NOW,
         "updated_at": NOW,
         "category_ids": [CATEGORY_ID],
+    }
+
+
+def product_search_record(
+    *,
+    product_id: UUID = PRODUCT_ID,
+    slug: str = "mediterranean-bowl",
+    title: str = "Mediterranean Bowl",
+    exact_title_rank: int = 1,
+    title_match_rank: int = 1,
+    search_rank: Decimal = Decimal("0.765432"),
+) -> dict[str, object]:
+    return {
+        **product_record(product_id=product_id, slug=slug, title=title),
+        "exact_title_rank": exact_title_rank,
+        "title_match_rank": title_match_rank,
+        "search_rank": search_rank,
     }
 
 
@@ -164,6 +188,66 @@ class PublicProductListPool:
         assert "p.created_at < $3" in query
         assert args == (CATEGORY_ID, "active", NOW, PRODUCT_ID, 2)
         return [product_record()]
+
+
+class PublicProductSearchPool:
+    def __init__(self) -> None:
+        self.call_count = 0
+
+    async def fetch(self, query: str, *args: object) -> list[dict[str, object]]:
+        self.call_count += 1
+        if "count(*)" in query or "OFFSET" in query:
+            raise AssertionError(f"Unexpected pagination query: {query}")
+
+        assert "websearch_to_tsquery" in query
+        assert "'pg_catalog.english'::regconfig" in query
+        assert "p.search_vector_en_us @@ search_query.query" in query
+        assert "p.title ->> 'EN-US'" in query
+        assert "INNER JOIN categories AS c ON c.id = pc.category_id" in query
+        assert query.index("p.exact_title_rank DESC") < query.index("p.title_match_rank DESC")
+        assert query.index("p.title_match_rank DESC") < query.index("p.search_rank DESC")
+
+        next_record = product_search_record(
+            product_id=NEXT_PRODUCT_ID,
+            slug="fresh-bowl",
+            title="Fresh Bowl",
+            exact_title_rank=0,
+            title_match_rank=0,
+            search_rank=Decimal("0.123456"),
+        )
+        if self.call_count == 1:
+            assert args == ("Mediterranean Bowl", CATEGORY_ID, "active", 2)
+            return [product_search_record(), next_record]
+
+        assert "p.exact_title_rank < $4" in query
+        assert "p.title_match_rank < $5" in query
+        assert "p.search_rank < $6" in query
+        assert args == (
+            "Mediterranean Bowl",
+            CATEGORY_ID,
+            "active",
+            1,
+            1,
+            Decimal("0.765432"),
+            NOW,
+            PRODUCT_ID,
+            2,
+        )
+        return [next_record]
+
+
+class PublicProductLanguageSearchPool:
+    def __init__(self, configuration: str, vector_column: str, title_key: str) -> None:
+        self.configuration = configuration
+        self.vector_column = vector_column
+        self.title_key = title_key
+
+    async def fetch(self, query: str, *args: object) -> list[dict[str, object]]:
+        assert f"'{self.configuration}'::regconfig" in query
+        assert f"p.{self.vector_column} @@ search_query.query" in query
+        assert f"p.title ->> '{self.title_key}'" in query
+        assert args == ("meal", 2)
+        return []
 
 
 class PublicSubscriptionListPool:
@@ -263,6 +347,89 @@ def test_public_products_filter_by_active_category_with_cursor(monkeypatch: Any)
     assert payload["items"][0]["slug"] == "mediterranean-bowl"
     assert payload["items"][0]["title"] == "Mediterranean Bowl HY"
     assert payload["items"][0]["serving_size"] is None
+
+
+def test_public_products_search_by_locale_with_relevance_cursor(monkeypatch: Any) -> None:
+    pool = PublicProductSearchPool()
+    app = configure_test_app(monkeypatch, pool)
+    request_params = {
+        "category_id": str(CATEGORY_ID),
+        "search": "  Mediterranean   Bowl  ",
+        "limit": "1",
+    }
+
+    try:
+        with TestClient(app) as client:
+            first_response = client.get("/api/v1/en-us/products", params=request_params)
+            cursor = first_response.json()["next_cursor"]
+            second_response = client.get(
+                "/api/v1/en-us/products",
+                params={**request_params, "cursor": cursor},
+            )
+            mismatched_response = client.get(
+                "/api/v1/en-us/products",
+                params={**request_params, "search": "Fresh Bowl", "cursor": cursor},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert first_response.status_code == 200
+    first_payload = first_response.json()
+    assert first_payload["items"][0]["title"] == "Mediterranean Bowl"
+    decoded_cursor = decode_cursor(str(first_payload["next_cursor"]))
+    assert decoded_cursor["kind"] == "product-search-v1"
+    assert decoded_cursor["exact_title_rank"] == 1
+    assert decoded_cursor["title_match_rank"] == 1
+    assert decoded_cursor["search_rank"] == "0.765432"
+    assert len(str(decoded_cursor["filter_fingerprint"])) == 64
+
+    assert second_response.status_code == 200
+    assert second_response.json()["items"][0]["title"] == "Fresh Bowl"
+    assert second_response.json()["next_cursor"] is None
+    assert mismatched_response.status_code == 422
+    assert mismatched_response.json()["detail"] == "Invalid cursor"
+    assert pool.call_count == 2
+
+
+@pytest.mark.parametrize(
+    ("locale", "configuration", "vector_column", "title_key"),
+    [
+        ("hy-am", "pg_catalog.armenian", "search_vector_hy_am", "HY-AM"),
+        ("en-us", "pg_catalog.english", "search_vector_en_us", "EN-US"),
+        ("ru-ru", "pg_catalog.russian", "search_vector_ru_ru", "RU-RU"),
+    ],
+)
+def test_public_products_search_uses_requested_language(
+    monkeypatch: Any,
+    locale: str,
+    configuration: str,
+    vector_column: str,
+    title_key: str,
+) -> None:
+    pool = PublicProductLanguageSearchPool(configuration, vector_column, title_key)
+    app = configure_test_app(monkeypatch, pool)
+
+    try:
+        with TestClient(app) as client:
+            response = client.get(f"/api/v1/{locale}/products?search=meal&limit=1")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json() == {"items": [], "limit": 1, "next_cursor": None}
+
+
+@pytest.mark.parametrize("search", ["   ", "x" * 101])
+def test_public_products_reject_invalid_search(monkeypatch: Any, search: str) -> None:
+    app = configure_test_app(monkeypatch, UnexpectedFetchPool())
+
+    try:
+        with TestClient(app) as client:
+            response = client.get("/api/v1/en-us/products", params={"search": search})
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 422
 
 
 def test_public_subscriptions_use_cursor_pagination(monkeypatch: Any) -> None:

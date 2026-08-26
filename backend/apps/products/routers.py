@@ -20,6 +20,10 @@ async def list_public_products(
     language: LocaleFromPath,
     pool: DbPool,
     category_id: UUID | None = None,
+    search: Annotated[
+        str | None,
+        Query(min_length=1, max_length=100, pattern=r".*\S.*"),
+    ] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     cursor: Annotated[str | None, Query(min_length=1)] = None,
 ) -> CursorPage[PublicProductRead]:
@@ -27,6 +31,7 @@ async def list_public_products(
         pool=pool,
         language=language,
         category_id=category_id,
+        search=search,
         limit=limit,
         cursor=cursor,
     )

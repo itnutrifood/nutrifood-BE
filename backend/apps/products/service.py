@@ -1,5 +1,8 @@
+import hashlib
+import json
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from uuid import UUID
 
 import asyncpg
@@ -32,6 +35,9 @@ class ProductCursor:
 def _parse_product_cursor(cursor: str) -> ProductCursor:
     payload = decode_cursor(cursor)
 
+    if set(payload) != {"created_at", "id"}:
+        raise InvalidCursorError("Invalid product cursor")
+
     created_at = payload.get("created_at")
     product_id = payload.get("id")
 
@@ -56,13 +62,132 @@ def _product_cursor(product: ProductRead) -> str:
     return encode_cursor({"created_at": product.created_at, "id": product.id})
 
 
+def _search_filter_fingerprint(
+    language: LanguageCode,
+    search: str,
+    category_id: UUID | None,
+) -> str:
+    canonical_filters = json.dumps(
+        [language.value, search.casefold(), str(category_id) if category_id is not None else None],
+        ensure_ascii=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical_filters.encode("utf-8")).hexdigest()
+
+
+def _parse_product_search_cursor(
+    cursor: str,
+    expected_filter_fingerprint: str,
+) -> repository.ProductSearchPosition:
+    payload = decode_cursor(cursor)
+    expected_keys = {
+        "kind",
+        "exact_title_rank",
+        "title_match_rank",
+        "search_rank",
+        "created_at",
+        "id",
+        "filter_fingerprint",
+    }
+    if set(payload) != expected_keys or payload.get("kind") != "product-search-v1":
+        raise InvalidCursorError("Invalid product search cursor")
+
+    exact_title_rank = payload.get("exact_title_rank")
+    title_match_rank = payload.get("title_match_rank")
+    search_rank = payload.get("search_rank")
+    created_at = payload.get("created_at")
+    product_id = payload.get("id")
+    filter_fingerprint = payload.get("filter_fingerprint")
+
+    if type(exact_title_rank) is not int or exact_title_rank not in {0, 1}:
+        raise InvalidCursorError("Invalid product search cursor")
+    if type(title_match_rank) is not int or title_match_rank not in {0, 1}:
+        raise InvalidCursorError("Invalid product search cursor")
+    if not isinstance(search_rank, str):
+        raise InvalidCursorError("Invalid product search cursor")
+    if not isinstance(created_at, str) or not created_at:
+        raise InvalidCursorError("Invalid product search cursor")
+    if not isinstance(product_id, str):
+        raise InvalidCursorError("Invalid product search cursor")
+    if filter_fingerprint != expected_filter_fingerprint:
+        raise InvalidCursorError("Invalid product search cursor")
+
+    try:
+        parsed_search_rank = Decimal(search_rank)
+        parsed_created_at = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+        parsed_product_id = UUID(product_id)
+    except (InvalidOperation, ValueError) as exc:
+        raise InvalidCursorError("Invalid product search cursor") from exc
+
+    if not parsed_search_rank.is_finite() or parsed_search_rank < 0:
+        raise InvalidCursorError("Invalid product search cursor")
+    if parsed_created_at.tzinfo is None:
+        raise InvalidCursorError("Invalid product search cursor")
+
+    return repository.ProductSearchPosition(
+        exact_title_rank=exact_title_rank,
+        title_match_rank=title_match_rank,
+        search_rank=parsed_search_rank,
+        created_at=parsed_created_at,
+        id=parsed_product_id,
+    )
+
+
+def _product_search_cursor(
+    result: repository.ProductSearchResult,
+    filter_fingerprint: str,
+) -> str:
+    return encode_cursor(
+        {
+            "kind": "product-search-v1",
+            "exact_title_rank": result.position.exact_title_rank,
+            "title_match_rank": result.position.title_match_rank,
+            "search_rank": result.position.search_rank,
+            "created_at": result.position.created_at,
+            "id": result.position.id,
+            "filter_fingerprint": filter_fingerprint,
+        }
+    )
+
+
 async def list_public_products(
     pool: asyncpg.Pool,
     language: LanguageCode,
     category_id: UUID | None,
     limit: int,
     cursor: str | None,
+    search: str | None,
 ) -> CursorPage[PublicProductRead]:
+    if search is not None:
+        normalized_search = " ".join(search.split())
+        filter_fingerprint = _search_filter_fingerprint(
+            language,
+            normalized_search,
+            category_id,
+        )
+        parsed_search_cursor: repository.ProductSearchPosition | None = None
+        if cursor is not None:
+            parsed_search_cursor = _parse_product_search_cursor(cursor, filter_fingerprint)
+
+        results = await repository.search_public_products(
+            pool=pool,
+            language=language,
+            search=normalized_search,
+            category_id=category_id,
+            limit=limit,
+            cursor=parsed_search_cursor,
+        )
+        next_cursor = (
+            _product_search_cursor(results[limit - 1], filter_fingerprint)
+            if len(results) > limit
+            else None
+        )
+        return CursorPage(
+            items=[to_public_product(result.product, language) for result in results[:limit]],
+            limit=limit,
+            next_cursor=next_cursor,
+        )
+
     parsed_cursor: ProductCursor | None = None
     if cursor is not None:
         parsed_cursor = _parse_product_cursor(cursor)

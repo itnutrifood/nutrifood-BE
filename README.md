@@ -50,6 +50,19 @@ persistence logic.
 Public catalog reads are locale-scoped. Use lowercase locale codes in the URL:
 `en-us`, `hy-am`, or `ru-ru`.
 
+Products can be searched in the requested locale with the optional `search`
+parameter:
+
+```text
+GET /api/v1/en-us/products?search=protein+bowl
+GET /api/v1/hy-am/products?category_id=<category-uuid>&search=աղցան
+```
+
+Search covers the localized title and description. Exact title matches rank
+first, followed by other title matches and description-only matches. Search
+results use the response's `next_cursor` value for subsequent pages, and that
+cursor must be reused with the same locale, search text, and category filter.
+
 ## Migrations
 
 Create a migration:
