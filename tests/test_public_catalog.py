@@ -199,7 +199,9 @@ class PublicProductSearchPool:
         if "count(*)" in query or "OFFSET" in query:
             raise AssertionError(f"Unexpected pagination query: {query}")
 
-        assert "websearch_to_tsquery" in query
+        assert "to_tsquery" in query
+        assert "tsvector_to_array" in query
+        assert "quote_literal(lexeme) || ':*'" in query
         assert "'pg_catalog.english'::regconfig" in query
         assert "p.search_vector_en_us @@ search_query.query" in query
         assert "p.title ->> 'EN-US'" in query
@@ -216,14 +218,14 @@ class PublicProductSearchPool:
             search_rank=Decimal("0.123456"),
         )
         if self.call_count == 1:
-            assert args == ("Mediterranean Bowl", CATEGORY_ID, "active", 2)
+            assert args == ("Mediterranean Bow", CATEGORY_ID, "active", 2)
             return [product_search_record(), next_record]
 
         assert "p.exact_title_rank < $4" in query
         assert "p.title_match_rank < $5" in query
         assert "p.search_rank < $6" in query
         assert args == (
-            "Mediterranean Bowl",
+            "Mediterranean Bow",
             CATEGORY_ID,
             "active",
             1,
@@ -354,7 +356,7 @@ def test_public_products_search_by_locale_with_relevance_cursor(monkeypatch: Any
     app = configure_test_app(monkeypatch, pool)
     request_params = {
         "category_id": str(CATEGORY_ID),
-        "search": "  Mediterranean   Bowl  ",
+        "search": "  Mediterranean   Bow  ",
         "limit": "1",
     }
 

@@ -543,10 +543,18 @@ async def search_public_products(
         await pool.fetch(
             f"""
             WITH search_query AS (
-                SELECT websearch_to_tsquery(
+                SELECT to_tsquery(
                     '{configuration.text_search_configuration}'::regconfig,
-                    $1
+                    string_agg(quote_literal(lexeme) || ':*', ' & ')
                 ) AS query
+                FROM unnest(
+                    tsvector_to_array(
+                        to_tsvector(
+                            '{configuration.text_search_configuration}'::regconfig,
+                            $1
+                        )
+                    )
+                ) AS search_lexemes(lexeme)
             ),
             ranked_products AS (
                 SELECT

@@ -58,10 +58,11 @@ GET /api/v1/en-us/products?search=protein+bowl
 GET /api/v1/hy-am/products?category_id=<category-uuid>&search=աղցան
 ```
 
-Search covers the localized title and description. Exact title matches rank
-first, followed by other title matches and description-only matches. Search
-results use the response's `next_cursor` value for subsequent pages, and that
-cursor must be reused with the same locale, search text, and category filter.
+Search covers localized title and description word prefixes, so a query such as
+`protei` matches `protein`. Exact title matches rank first, followed by other
+title matches and description-only matches. Search results use the response's
+`next_cursor` value for subsequent pages, and that cursor must be reused with
+the same locale, search text, and category filter.
 
 ## Migrations
 
