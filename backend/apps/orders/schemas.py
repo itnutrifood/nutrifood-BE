@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, StringConstraints
+from pydantic import AwareDatetime, BaseModel, ConfigDict, StringConstraints
 
 from backend.apps.common.enums import OrderStatus, PaymentMethod, PaymentStatus
 from backend.apps.common.pagination import Page
@@ -35,6 +35,7 @@ class PlaceOrderRequest(BaseModel):
     address_id: UUID
     payment_method: PaymentMethod
     contact_phone: ContactPhone
+    requested_delivery_at: AwareDatetime | None = None
     delivery_notes: DeliveryNotes | None = None
 
 
@@ -73,6 +74,7 @@ class OrderSummaryRead(BaseModel):
     customer_last_name: str | None
     customer_email: str
     contact_phone: str
+    requested_delivery_at: datetime | None
     created_at: datetime
     updated_at: datetime
 

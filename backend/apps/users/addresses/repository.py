@@ -86,7 +86,7 @@ async def _lock_default_address_changes(
 ) -> None:
     await connection.fetchval(
         "SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))",
-        user_id,
+        str(user_id),
     )
 
 

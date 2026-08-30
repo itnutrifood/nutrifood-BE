@@ -56,6 +56,8 @@ parameter:
 ```text
 GET /api/v1/en-us/products?search=protein+bowl
 GET /api/v1/hy-am/products?category_id=<category-uuid>&search=աղցան
+GET /api/v1/en-us/products?sort=price_asc
+GET /api/v1/en-us/products/by-slug/salmon-power-bowl
 ```
 
 Search covers localized title and description word prefixes, so a query such as
@@ -63,6 +65,11 @@ Search covers localized title and description word prefixes, so a query such as
 title matches and description-only matches. Search results use the response's
 `next_cursor` value for subsequent pages, and that cursor must be reused with
 the same locale, search text, and category filter.
+
+Use `sort=price_asc` or `sort=price_desc` for database-level price ordering. Price-sorted
+pages also use `next_cursor`; reuse it with the same locale, sort, search, and category
+parameters. Product detail pages can resolve a slug directly through
+`GET /api/v1/{locale}/products/by-slug/{slug}`.
 
 ## Migrations
 
@@ -440,6 +447,7 @@ Content-Type: application/json
   "address_id": "<address-uuid>",
   "payment_method": "cash_on_delivery",
   "contact_phone": "+37499123456",
+  "requested_delivery_at": "2026-09-03T14:00:00Z",
   "delivery_notes": "Call on arrival"
 }
 ```
@@ -447,6 +455,8 @@ Content-Type: application/json
 Use `pos` for card-at-delivery. Online payment is intentionally not accepted until a
 merchant integration is available. `Idempotency-Key` is required so a client can safely
 retry after a timeout; reusing it with changed checkout fields returns `409`.
+Send `requested_delivery_at` as an ISO 8601 timestamp with a timezone when the customer
+chooses a delivery time. Omit it or send `null` for "as soon as possible".
 Successful orders receive a customer-facing number such as `NFUX6Q8N6LD`; UUIDs remain
 the internal API identifiers used in resource URLs.
 

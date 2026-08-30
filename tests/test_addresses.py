@@ -89,7 +89,7 @@ class AddressPool:
 
     async def fetchval(self, query: str, *args: object) -> None:
         assert "pg_advisory_xact_lock" in query
-        assert args == (USER_ID,)
+        assert args == (str(USER_ID),)
         self.advisory_lock_count += 1
 
     async def fetchrow(self, query: str, *args: object) -> dict[str, object] | None:

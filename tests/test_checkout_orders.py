@@ -16,6 +16,7 @@ ORDER_ID = UUID("70000000-0000-0000-0000-000000000001")
 ORDER_ITEM_ID = UUID("71000000-0000-0000-0000-000000000001")
 PRODUCT_ID = UUID("10000000-0000-0000-0000-000000000001")
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
+REQUESTED_DELIVERY_AT = datetime(2026, 9, 3, 14, 0, tzinfo=UTC)
 
 
 class DummyPool:
@@ -54,6 +55,7 @@ def order_record(
     *,
     payment_method: str = "cash_on_delivery",
     request_fingerprint: str = "a" * 64,
+    requested_delivery_at: datetime | None = REQUESTED_DELIVERY_AT,
 ) -> dict[str, object]:
     return {
         "id": ORDER_ID,
@@ -78,6 +80,7 @@ def order_record(
         "delivery_building_number": "10/1",
         "delivery_entrance": "2",
         "delivery_floor": "5",
+        "requested_delivery_at": requested_delivery_at,
         "delivery_notes": "Call on arrival",
         "request_fingerprint": request_fingerprint,
         "created_at": NOW,
@@ -109,9 +112,16 @@ class AsyncContext:
 
 
 class CheckoutPool:
-    def __init__(self, *, empty: bool = False, address_exists: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        empty: bool = False,
+        address_exists: bool = True,
+        requested_delivery_at: datetime | None = REQUESTED_DELIVERY_AT,
+    ) -> None:
         self.empty = empty
         self.address_exists = address_exists
+        self.requested_delivery_at = requested_delivery_at
         self.stored_order: dict[str, object] | None = None
         self.idempotency_key: str | None = None
         self.order_insert_count = 0
@@ -127,7 +137,7 @@ class CheckoutPool:
 
     async def fetchval(self, query: str, *args: object) -> None:
         assert "pg_advisory_xact_lock" in query
-        assert args == (USER_ID,)
+        assert args == (str(USER_ID),)
         self.advisory_lock_count += 1
 
     async def fetchrow(self, query: str, *args: object) -> dict[str, object] | None:
@@ -159,11 +169,13 @@ class CheckoutPool:
             assert args[2] == Decimal("25.98")
             assert args[3] == "USD"
             assert args[8] == ADDRESS_ID
-            assert args[17] == "checkout-attempt-1"
-            self.idempotency_key = str(args[17])
+            assert args[16] == self.requested_delivery_at
+            assert args[18] == "checkout-attempt-1"
+            self.idempotency_key = str(args[18])
             self.stored_order = order_record(
                 payment_method=str(args[1]),
-                request_fingerprint=str(args[18]),
+                request_fingerprint=str(args[19]),
+                requested_delivery_at=args[16],  # type: ignore[arg-type]
             )
             self.order_insert_count += 1
             return self.stored_order
@@ -265,6 +277,7 @@ def place_order_payload(**changes: object) -> dict[str, object]:
         "address_id": str(ADDRESS_ID),
         "payment_method": "cash_on_delivery",
         "contact_phone": "+37499123456",
+        "requested_delivery_at": "2026-09-03T14:00:00Z",
         "delivery_notes": "Call on arrival",
     }
     payload.update(changes)
@@ -298,11 +311,48 @@ def test_place_order_snapshots_server_totals_clears_cart_and_replays_safely(
     assert first_response.json()["order_number"] == "NFUX6Q8N6LD"
     assert first_response.json()["subtotal"] == "25.98"
     assert first_response.json()["payment_status"] == "unpaid"
+    assert first_response.json()["requested_delivery_at"] == "2026-09-03T14:00:00Z"
     assert first_response.json()["items"][0]["product_title"]["EN-US"] == ("Mediterranean Bowl")
     assert pool.order_insert_count == 1
     assert pool.cart_read_count == 1
     assert pool.deleted_product_ids == [PRODUCT_ID]
     assert pool.advisory_lock_count == 2
+
+
+def test_place_order_rejects_requested_delivery_at_without_timezone(monkeypatch: Any) -> None:
+    pool = CheckoutPool()
+    app = configure_test_app(monkeypatch, pool)
+
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/checkout/orders",
+                headers={"Idempotency-Key": "checkout-attempt-1"},
+                json=place_order_payload(requested_delivery_at="2026-09-03T14:00:00"),
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 422
+    assert pool.order_insert_count == 0
+
+
+def test_place_order_accepts_null_requested_delivery_at_for_asap(monkeypatch: Any) -> None:
+    pool = CheckoutPool(requested_delivery_at=None)
+    app = configure_test_app(monkeypatch, pool)
+
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/checkout/orders",
+                headers={"Idempotency-Key": "checkout-attempt-1"},
+                json=place_order_payload(requested_delivery_at=None),
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 201
+    assert response.json()["requested_delivery_at"] is None
 
 
 def test_place_order_rejects_reusing_key_for_different_request(monkeypatch: Any) -> None:

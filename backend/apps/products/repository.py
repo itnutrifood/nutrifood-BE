@@ -24,6 +24,7 @@ from backend.apps.products.schemas import (
     ProductImage,
     ProductListResponse,
     ProductRead,
+    ProductSort,
     ProductUpdate,
 )
 
@@ -465,6 +466,95 @@ async def list_public_products(
     return [product_from_record(row) for row in rows]
 
 
+async def list_public_products_by_price(
+    pool: asyncpg.Pool,
+    language: LanguageCode,
+    search: str | None,
+    category_id: UUID | None,
+    sort: ProductSort,
+    limit: int,
+    cursor: tuple[Decimal, UUID] | None,
+) -> list[ProductRead]:
+    params: list[object] = []
+    conditions: list[str] = []
+    search_cte = ""
+    search_join = ""
+
+    if search is not None:
+        configuration = PRODUCT_SEARCH_CONFIGURATIONS[language]
+        params.append(search)
+        search_cte = f"""
+            WITH search_query AS (
+                SELECT to_tsquery(
+                    '{configuration.text_search_configuration}'::regconfig,
+                    string_agg(quote_literal(lexeme) || ':*', ' & ')
+                ) AS query
+                FROM unnest(
+                    tsvector_to_array(
+                        to_tsvector(
+                            '{configuration.text_search_configuration}'::regconfig,
+                            $1
+                        )
+                    )
+                ) AS search_lexemes(lexeme)
+            )
+        """
+        search_join = "CROSS JOIN search_query"
+        conditions.append(f"p.{configuration.vector_column} @@ search_query.query")
+
+    if category_id is not None:
+        params.append(category_id)
+        category_id_param = len(params)
+        params.append(CategoryStatus.ACTIVE.value)
+        status_param = len(params)
+        conditions.append(
+            f"""
+            EXISTS (
+                SELECT 1
+                FROM product_categories AS pc
+                INNER JOIN categories AS c ON c.id = pc.category_id
+                WHERE pc.product_id = p.id
+                    AND pc.category_id = ${category_id_param}
+                    AND c.status = ${status_param}::category_status
+            )
+            """
+        )
+
+    comparison = ">" if sort is ProductSort.PRICE_ASC else "<"
+    direction = "ASC" if sort is ProductSort.PRICE_ASC else "DESC"
+    if cursor is not None:
+        params.extend(cursor)
+        price_param = len(params) - 1
+        id_param = len(params)
+        conditions.append(
+            f"""
+            (
+                p.price {comparison} ${price_param}
+                OR (p.price = ${price_param} AND p.id > ${id_param})
+            )
+            """
+        )
+
+    where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    params.append(limit + 1)
+    rows = cast(
+        Sequence[Mapping[str, object]],
+        await pool.fetch(
+            f"""
+            {search_cte}
+            SELECT {PRODUCT_COLUMNS}
+            FROM products AS p
+            {search_join}
+            {where_clause}
+            ORDER BY p.price {direction}, p.id
+            LIMIT ${len(params)}
+            """,
+            *params,
+        ),
+    )
+    return [product_from_record(row) for row in rows]
+
+
 async def search_public_products(
     pool: asyncpg.Pool,
     language: LanguageCode,
@@ -617,3 +707,21 @@ async def search_public_products(
 
 async def get_public_product(pool: asyncpg.Pool, product_id: UUID) -> ProductRead:
     return await get_product(pool, product_id)
+
+
+async def get_public_product_by_slug(pool: asyncpg.Pool, slug: str) -> ProductRead:
+    row = cast(
+        Mapping[str, object] | None,
+        await pool.fetchrow(
+            f"""
+            SELECT {PRODUCT_COLUMNS}
+            FROM products AS p
+            WHERE p.slug = $1
+            """,
+            slug,
+        ),
+    )
+    if row is None:
+        raise ProductNotFoundError
+
+    return product_from_record(row)

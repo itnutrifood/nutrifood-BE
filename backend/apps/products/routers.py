@@ -5,8 +5,8 @@ from fastapi import APIRouter, Query
 
 from backend.apps.common.localization import LocaleFromPath
 from backend.apps.common.pagination import CursorPage
-from backend.apps.products.schemas import PublicProductRead
-from backend.apps.products.service import get_public_product
+from backend.apps.products.schemas import ProductSlug, ProductSort, PublicProductRead
+from backend.apps.products.service import get_public_product, get_public_product_by_slug
 from backend.apps.products.service import (
     list_public_products as list_public_products_service,
 )
@@ -24,6 +24,7 @@ async def list_public_products(
         str | None,
         Query(min_length=1, max_length=100, pattern=r".*\S.*"),
     ] = None,
+    sort: ProductSort | None = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     cursor: Annotated[str | None, Query(min_length=1)] = None,
 ) -> CursorPage[PublicProductRead]:
@@ -32,9 +33,19 @@ async def list_public_products(
         language=language,
         category_id=category_id,
         search=search,
+        sort=sort,
         limit=limit,
         cursor=cursor,
     )
+
+
+@router.get("/by-slug/{slug}", response_model=PublicProductRead)
+async def read_public_product_by_slug(
+    language: LocaleFromPath,
+    slug: ProductSlug,
+    pool: DbPool,
+) -> PublicProductRead:
+    return await get_public_product_by_slug(pool, language, slug)
 
 
 @router.get("/{product_id}", response_model=PublicProductRead)

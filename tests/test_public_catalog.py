@@ -67,6 +67,7 @@ def product_record(
     product_id: UUID = PRODUCT_ID,
     slug: str = "mediterranean-bowl",
     title: str = "Mediterranean Bowl",
+    price: Decimal = Decimal("12.99"),
 ) -> dict[str, object]:
     return {
         "id": product_id,
@@ -87,7 +88,7 @@ def product_record(
         "text_tags": json.dumps(localized_words("bowls")),
         "serving_size": json.dumps({"EN-US": "400g"}),
         "readiness_time_minutes": 3,
-        "price": Decimal("12.99"),
+        "price": price,
         "allergens": json.dumps(localized_words("Sesame")),
         "allergen_information": json.dumps({"EN-US": "Contains sesame."}),
         "storage_delivery": json.dumps({"EN-US": "Keep refrigerated."}),
@@ -188,6 +189,56 @@ class PublicProductListPool:
         assert "p.created_at < $3" in query
         assert args == (CATEGORY_ID, "active", NOW, PRODUCT_ID, 2)
         return [product_record()]
+
+
+class PublicProductPriceListPool:
+    def __init__(self) -> None:
+        self.call_count = 0
+
+    async def fetch(self, query: str, *args: object) -> list[dict[str, object]]:
+        self.call_count += 1
+        assert "ORDER BY p.price ASC, p.id" in query
+        if self.call_count == 1:
+            assert args == (2,)
+            return [
+                product_record(price=Decimal("9.99")),
+                product_record(
+                    product_id=NEXT_PRODUCT_ID,
+                    slug="fresh-bowl",
+                    title="Fresh Bowl",
+                    price=Decimal("19.99"),
+                ),
+            ]
+
+        assert "p.price > $1" in query
+        assert "p.price = $1 AND p.id > $2" in query
+        assert args == (Decimal("9.99"), PRODUCT_ID, 2)
+        return [
+            product_record(
+                product_id=NEXT_PRODUCT_ID,
+                slug="fresh-bowl",
+                title="Fresh Bowl",
+                price=Decimal("19.99"),
+            )
+        ]
+
+
+class PublicProductPriceDescendingPool:
+    async def fetch(self, query: str, *args: object) -> list[dict[str, object]]:
+        assert "ORDER BY p.price DESC, p.id" in query
+        assert args == (2,)
+        return [product_record(price=Decimal("19.99"))]
+
+
+class PublicProductSlugReadPool:
+    def __init__(self, *, found: bool = True) -> None:
+        self.found = found
+
+    async def fetchrow(self, query: str, *args: object) -> dict[str, object] | None:
+        assert "FROM products AS p" in query
+        assert "WHERE p.slug = $1" in query
+        assert args == ("mediterranean-bowl",)
+        return product_record() if self.found else None
 
 
 class PublicProductSearchPool:
@@ -349,6 +400,73 @@ def test_public_products_filter_by_active_category_with_cursor(monkeypatch: Any)
     assert payload["items"][0]["slug"] == "mediterranean-bowl"
     assert payload["items"][0]["title"] == "Mediterranean Bowl HY"
     assert payload["items"][0]["serving_size"] is None
+
+
+def test_public_products_sort_by_price_across_cursor_pages(monkeypatch: Any) -> None:
+    pool = PublicProductPriceListPool()
+    app = configure_test_app(monkeypatch, pool)
+
+    try:
+        with TestClient(app) as client:
+            first_response = client.get("/api/v1/en-us/products?sort=price_asc&limit=1")
+            cursor = first_response.json()["next_cursor"]
+            second_response = client.get(
+                "/api/v1/en-us/products",
+                params={"sort": "price_asc", "limit": "1", "cursor": cursor},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert first_response.status_code == 200
+    assert first_response.json()["items"][0]["price"] == "9.99"
+    decoded_cursor = decode_cursor(str(first_response.json()["next_cursor"]))
+    assert decoded_cursor["kind"] == "product-price-v1"
+    assert decoded_cursor["sort"] == "price_asc"
+    assert decoded_cursor["price"] == "9.99"
+    assert len(str(decoded_cursor["filter_fingerprint"])) == 64
+    assert second_response.status_code == 200
+    assert second_response.json()["items"][0]["price"] == "19.99"
+    assert second_response.json()["next_cursor"] is None
+
+
+def test_public_products_support_descending_price_sort(monkeypatch: Any) -> None:
+    app = configure_test_app(monkeypatch, PublicProductPriceDescendingPool())
+
+    try:
+        with TestClient(app) as client:
+            response = client.get("/api/v1/en-us/products?sort=price_desc&limit=1")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["price"] == "19.99"
+
+
+def test_public_product_can_be_read_directly_by_slug(monkeypatch: Any) -> None:
+    app = configure_test_app(monkeypatch, PublicProductSlugReadPool())
+
+    try:
+        with TestClient(app) as client:
+            response = client.get("/api/v1/ru-ru/products/by-slug/mediterranean-bowl")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["id"] == str(PRODUCT_ID)
+    assert response.json()["title"] == "Mediterranean Bowl RU"
+
+
+def test_public_product_slug_lookup_returns_not_found(monkeypatch: Any) -> None:
+    app = configure_test_app(monkeypatch, PublicProductSlugReadPool(found=False))
+
+    try:
+        with TestClient(app) as client:
+            response = client.get("/api/v1/en-us/products/by-slug/mediterranean-bowl")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Product not found"
 
 
 def test_public_products_search_by_locale_with_relevance_cursor(monkeypatch: Any) -> None:

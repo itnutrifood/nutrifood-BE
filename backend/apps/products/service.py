@@ -21,7 +21,7 @@ from backend.apps.common.pagination import (
 )
 from backend.apps.products import repository
 from backend.apps.products.exceptions import ProductNotFoundError
-from backend.apps.products.schemas import ProductRead, PublicProductRead
+from backend.apps.products.schemas import ProductRead, ProductSort, PublicProductRead
 
 PublicProductNotFoundError = ProductNotFoundError
 
@@ -29,6 +29,12 @@ PublicProductNotFoundError = ProductNotFoundError
 @dataclass(frozen=True)
 class ProductCursor:
     created_at: datetime
+    id: UUID
+
+
+@dataclass(frozen=True)
+class ProductPriceCursor:
+    price: Decimal
     id: UUID
 
 
@@ -60,6 +66,74 @@ def _parse_product_cursor(cursor: str) -> ProductCursor:
 
 def _product_cursor(product: ProductRead) -> str:
     return encode_cursor({"created_at": product.created_at, "id": product.id})
+
+
+def _price_filter_fingerprint(
+    language: LanguageCode,
+    sort: ProductSort,
+    search: str | None,
+    category_id: UUID | None,
+) -> str:
+    canonical_filters = json.dumps(
+        [
+            language.value,
+            sort.value,
+            search.casefold() if search is not None else None,
+            str(category_id) if category_id is not None else None,
+        ],
+        ensure_ascii=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical_filters.encode("utf-8")).hexdigest()
+
+
+def _parse_product_price_cursor(
+    cursor: str,
+    expected_sort: ProductSort,
+    expected_filter_fingerprint: str,
+) -> ProductPriceCursor:
+    payload = decode_cursor(cursor)
+    expected_keys = {"kind", "sort", "price", "id", "filter_fingerprint"}
+
+    if (
+        set(payload) != expected_keys
+        or payload.get("kind") != "product-price-v1"
+        or payload.get("sort") != expected_sort.value
+        or payload.get("filter_fingerprint") != expected_filter_fingerprint
+    ):
+        raise InvalidCursorError("Invalid product price cursor")
+
+    price = payload.get("price")
+    product_id = payload.get("id")
+    if not isinstance(price, str) or not isinstance(product_id, str):
+        raise InvalidCursorError("Invalid product price cursor")
+
+    try:
+        parsed_price = Decimal(price)
+        parsed_product_id = UUID(product_id)
+    except (InvalidOperation, ValueError) as exc:
+        raise InvalidCursorError("Invalid product price cursor") from exc
+
+    if not parsed_price.is_finite() or parsed_price < 0:
+        raise InvalidCursorError("Invalid product price cursor")
+
+    return ProductPriceCursor(price=parsed_price, id=parsed_product_id)
+
+
+def _product_price_cursor(
+    product: ProductRead,
+    sort: ProductSort,
+    filter_fingerprint: str,
+) -> str:
+    return encode_cursor(
+        {
+            "kind": "product-price-v1",
+            "sort": sort.value,
+            "price": product.price,
+            "id": product.id,
+            "filter_fingerprint": filter_fingerprint,
+        }
+    )
 
 
 def _search_filter_fingerprint(
@@ -157,9 +231,48 @@ async def list_public_products(
     limit: int,
     cursor: str | None,
     search: str | None,
+    sort: ProductSort | None = None,
 ) -> CursorPage[PublicProductRead]:
-    if search is not None:
-        normalized_search = " ".join(search.split())
+    normalized_search = " ".join(search.split()) if search is not None else None
+
+    if sort is not None:
+        filter_fingerprint = _price_filter_fingerprint(
+            language,
+            sort,
+            normalized_search,
+            category_id,
+        )
+        parsed_price_cursor: ProductPriceCursor | None = None
+        if cursor is not None:
+            parsed_price_cursor = _parse_product_price_cursor(
+                cursor,
+                sort,
+                filter_fingerprint,
+            )
+
+        products = await repository.list_public_products_by_price(
+            pool=pool,
+            language=language,
+            search=normalized_search,
+            category_id=category_id,
+            sort=sort,
+            limit=limit,
+            cursor=(parsed_price_cursor.price, parsed_price_cursor.id)
+            if parsed_price_cursor is not None
+            else None,
+        )
+        next_cursor = (
+            _product_price_cursor(products[limit - 1], sort, filter_fingerprint)
+            if len(products) > limit
+            else None
+        )
+        return CursorPage(
+            items=[to_public_product(product, language) for product in products[:limit]],
+            limit=limit,
+            next_cursor=next_cursor,
+        )
+
+    if normalized_search is not None:
         filter_fingerprint = _search_filter_fingerprint(
             language,
             normalized_search,
@@ -213,6 +326,15 @@ async def get_public_product(
     product_id: UUID,
 ) -> PublicProductRead:
     product = await repository.get_public_product(pool, product_id)
+    return to_public_product(product, language)
+
+
+async def get_public_product_by_slug(
+    pool: asyncpg.Pool,
+    language: LanguageCode,
+    slug: str,
+) -> PublicProductRead:
+    product = await repository.get_public_product_by_slug(pool, slug)
     return to_public_product(product, language)
 
 

@@ -43,6 +43,7 @@ ORDER_COLUMNS = """
     o.delivery_building_number,
     o.delivery_entrance,
     o.delivery_floor,
+    o.requested_delivery_at,
     o.delivery_notes,
     o.request_fingerprint,
     o.created_at,
@@ -88,6 +89,7 @@ def order_summary_from_record(record: Mapping[str, object]) -> OrderSummaryRead:
         customer_last_name=cast(str | None, record["customer_last_name"]),
         customer_email=cast(str, record["customer_email"]),
         contact_phone=cast(str, record["contact_phone"]),
+        requested_delivery_at=cast(datetime | None, record["requested_delivery_at"]),
         created_at=cast(datetime, record["created_at"]),
         updated_at=cast(datetime, record["updated_at"]),
     )

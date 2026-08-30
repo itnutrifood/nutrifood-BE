@@ -1,6 +1,7 @@
 from collections.abc import Sequence
 from datetime import datetime
 from decimal import Decimal
+from enum import StrEnum
 from typing import Annotated, Self
 from uuid import UUID
 
@@ -42,6 +43,11 @@ ReadinessTimeMinutes = Annotated[int, Field(ge=1, le=24 * 60)]
 ProductPrice = Annotated[Decimal, Field(ge=Decimal("0"), max_digits=10, decimal_places=2)]
 
 MAX_PRODUCT_IMAGES = 8
+
+
+class ProductSort(StrEnum):
+    PRICE_ASC = "price_asc"
+    PRICE_DESC = "price_desc"
 
 
 class LocalizedText(BaseModel):

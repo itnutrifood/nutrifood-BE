@@ -51,7 +51,7 @@ async def place_order(
         # the same cart, and so an idempotent retry observes the committed first order.
         await connection.fetchval(
             "SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))",
-            user_id,
+            str(user_id),
         )
 
         existing_order = cast(
@@ -151,13 +151,14 @@ async def place_order(
                     delivery_building_number,
                     delivery_entrance,
                     delivery_floor,
+                    requested_delivery_at,
                     delivery_notes,
                     idempotency_key,
                     request_fingerprint
                 )
                 VALUES (
                     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-                    $15, $16, $17, $18, $19
+                    $15, $16, $17, $18, $19, $20
                 )
                 RETURNING {ORDER_COLUMNS.replace("o.", "")}
                 """,
@@ -177,6 +178,7 @@ async def place_order(
                 address["building_number"],
                 address["entrance"],
                 address["floor"],
+                payload.requested_delivery_at,
                 payload.delivery_notes,
                 idempotency_key,
                 request_fingerprint,
