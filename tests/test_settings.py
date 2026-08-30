@@ -109,3 +109,50 @@ def test_r2_storage_requires_complete_configuration() -> None:
 
     with pytest.raises(AssetStorageNotConfiguredError):
         R2ObjectStorage.from_settings(settings)
+
+
+def test_production_rejects_published_security_defaults() -> None:
+    with pytest.raises(ValueError, match="POSTGRES_PASSWORD"):
+        Settings(
+            _env_file=None,
+            environment="production",
+            debug=False,
+            postgres_password="nutrifood",
+            database_url="postgresql://nutrifood:nutrifood@db:5432/nutrifood",
+            admin_username="admin@mail.com",
+            admin_password="123456",
+            admin_token_secret="change-me-to-a-long-random-secret",
+        )
+
+
+def test_production_accepts_non_default_security_configuration() -> None:
+    settings = Settings(
+        _env_file=None,
+        environment="production",
+        debug=False,
+        postgres_password="a-unique-database-password",
+        database_url=(
+            "postgresql://nutrifood:a-unique-database-password@db:5432/nutrifood"
+        ),
+        admin_username="operations@example.test",
+        admin_password="",
+        admin_token_secret="a-unique-admin-token-secret-with-32-bytes",
+    )
+
+    assert settings.is_production is True
+
+
+def test_production_rejects_debug_mode() -> None:
+    with pytest.raises(ValueError, match="DEBUG must be false"):
+        Settings(
+            _env_file=None,
+            environment="production",
+            debug=True,
+            postgres_password="a-unique-database-password",
+            database_url=(
+                "postgresql://nutrifood:a-unique-database-password@db:5432/nutrifood"
+            ),
+            admin_username="operations@example.test",
+            admin_password="",
+            admin_token_secret="a-unique-admin-token-secret-with-32-bytes",
+        )

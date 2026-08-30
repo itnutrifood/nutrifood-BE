@@ -105,13 +105,17 @@ async def create_asset_upload(
     upload_url = storage.create_upload_url(
         _staging_key(policy, upload_id),
         payload.content_type,
+        payload.size_bytes,
         expires_in,
     )
     return AssetUploadCreated(
         upload_id=upload_id,
         purpose=payload.purpose,
         upload_url=upload_url,
-        headers={"Content-Type": payload.content_type},
+        headers={
+            "Content-Type": payload.content_type,
+            "Content-Length": str(payload.size_bytes),
+        },
         expires_at=datetime.now(UTC) + timedelta(seconds=expires_in),
     )
 
@@ -292,7 +296,19 @@ async def complete_asset_upload(
         await _delete_invalid_upload(storage, staging_key)
         raise
 
-    await storage.promote_object(staging_key, final_key, payload.content_type)
+    try:
+        await storage.promote_object(
+            staging_key,
+            final_key,
+            payload.content_type,
+            metadata.etag,
+        )
+    except AssetUploadNotFoundError:
+        # Another completion can promote the same object between validation and copy.
+        return await _completed_asset(storage, upload_id, policy, payload)
+    except InvalidAssetUploadError:
+        await _delete_invalid_upload(storage, staging_key)
+        raise
     return _asset_read(
         storage,
         upload_id,

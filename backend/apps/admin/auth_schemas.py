@@ -16,11 +16,11 @@ class AdminRecord(AdminUser):
 
 
 class AdminLoginRequest(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True)
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    username: str | None = Field(default=None, min_length=1)
-    email: str | None = Field(default=None, min_length=1)
-    password: str = Field(min_length=1)
+    username: str | None = Field(default=None, min_length=1, max_length=320)
+    email: str | None = Field(default=None, min_length=1, max_length=320)
+    password: str = Field(min_length=1, max_length=1024)
 
     @model_validator(mode="after")
     def validate_identifier(self) -> Self:
@@ -37,7 +37,9 @@ class AdminLoginRequest(BaseModel):
 
 
 class AdminRefreshRequest(BaseModel):
-    refresh_token: str = Field(min_length=1)
+    model_config = ConfigDict(extra="forbid")
+
+    refresh_token: str = Field(min_length=1, max_length=4096)
 
 
 class AdminTokenPair(BaseModel):

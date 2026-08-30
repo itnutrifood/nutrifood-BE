@@ -17,14 +17,16 @@ from backend.apps.categories.schemas import (
 )
 from backend.apps.common.enums import CategoryStatus
 
+type CategoryDatabase = asyncpg.Connection | asyncpg.Pool
 
-async def _ensure_parent_exists(pool: asyncpg.Pool, parent_id: UUID) -> None:
+
+async def _ensure_parent_exists(pool: CategoryDatabase, parent_id: UUID) -> None:
     if not await repository.category_exists(pool, parent_id):
         raise ParentCategoryNotFoundError
 
 
 async def _validate_parent_for_update(
-    pool: asyncpg.Pool,
+    pool: CategoryDatabase,
     category_id: UUID,
     parent_id: UUID | None,
 ) -> None:
@@ -73,11 +75,20 @@ async def update_category(
     category_id: UUID,
     payload: CategoryUpdate,
 ) -> CategoryRead:
-    if not await repository.category_exists(pool, category_id):
-        raise CategoryNotFoundError
-    if "parent_id" in payload.model_fields_set:
-        await _validate_parent_for_update(pool, category_id, payload.parent_id)
-    return await repository.update_category(pool, category_id, payload)
+    if "parent_id" not in payload.model_fields_set:
+        if not await repository.category_exists(pool, category_id):
+            raise CategoryNotFoundError
+        return await repository.update_category(pool, category_id, payload)
+
+    async with pool.acquire() as connection, connection.transaction():
+        await repository.lock_category_hierarchy(connection)
+
+        # Re-read all hierarchy state after acquiring the transaction-scoped lock. A
+        # concurrent parent move may have committed while this request was waiting.
+        if not await repository.category_exists(connection, category_id):
+            raise CategoryNotFoundError
+        await _validate_parent_for_update(connection, category_id, payload.parent_id)
+        return await repository.update_category(connection, category_id, payload)
 
 
 async def delete_category(pool: asyncpg.Pool, category_id: UUID) -> None:

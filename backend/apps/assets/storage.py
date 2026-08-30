@@ -11,6 +11,7 @@ from backend.apps.assets.exceptions import (
     AssetStorageNotConfiguredError,
     AssetStorageUnavailableError,
     AssetUploadNotFoundError,
+    InvalidAssetUploadError,
 )
 from backend.config.settings import Settings
 
@@ -23,7 +24,13 @@ class ObjectMetadata:
 
 
 class AssetObjectStorage(Protocol):
-    def create_upload_url(self, object_key: str, content_type: str, expires_in: int) -> str: ...
+    def create_upload_url(
+        self,
+        object_key: str,
+        content_type: str,
+        size_bytes: int,
+        expires_in: int,
+    ) -> str: ...
 
     def public_url(self, object_key: str) -> str: ...
 
@@ -38,6 +45,7 @@ class AssetObjectStorage(Protocol):
         source_key: str,
         destination_key: str,
         content_type: str,
+        source_etag: str,
     ) -> None: ...
 
     async def delete_object(self, object_key: str) -> None: ...
@@ -101,7 +109,21 @@ class R2ObjectStorage:
         error = exc.response.get("Error", {})
         return error.get("Code") in {"404", "NoSuchKey", "NotFound"}
 
-    def create_upload_url(self, object_key: str, content_type: str, expires_in: int) -> str:
+    @staticmethod
+    def _is_precondition_failed(exc: ClientError) -> bool:
+        error = exc.response.get("Error", {})
+        response_metadata = exc.response.get("ResponseMetadata", {})
+        return error.get("Code") in {"412", "PreconditionFailed"} or (
+            response_metadata.get("HTTPStatusCode") == 412
+        )
+
+    def create_upload_url(
+        self,
+        object_key: str,
+        content_type: str,
+        size_bytes: int,
+        expires_in: int,
+    ) -> str:
         try:
             return str(
                 self._client.generate_presigned_url(
@@ -110,6 +132,7 @@ class R2ObjectStorage:
                         "Bucket": self._bucket_name,
                         "Key": object_key,
                         "ContentType": content_type,
+                        "ContentLength": size_bytes,
                     },
                     ExpiresIn=expires_in,
                 )
@@ -151,6 +174,10 @@ class R2ObjectStorage:
         except ClientError as exc:
             if self._is_not_found(exc):
                 raise AssetUploadNotFoundError from exc
+            if self._is_precondition_failed(exc):
+                raise InvalidAssetUploadError(
+                    "Uploaded asset changed during validation"
+                ) from exc
             raise AssetStorageUnavailableError from exc
         except BotoCoreError as exc:
             raise AssetStorageUnavailableError from exc
@@ -191,18 +218,28 @@ class R2ObjectStorage:
         source_key: str,
         destination_key: str,
         content_type: str,
+        source_etag: str,
     ) -> None:
         try:
             self._client.copy_object(
                 Bucket=self._bucket_name,
                 Key=destination_key,
                 CopySource={"Bucket": self._bucket_name, "Key": source_key},
+                CopySourceIfMatch=source_etag,
                 ContentType=content_type,
                 CacheControl="public, max-age=31536000, immutable",
                 MetadataDirective="REPLACE",
             )
             self._client.delete_object(Bucket=self._bucket_name, Key=source_key)
-        except (BotoCoreError, ClientError) as exc:
+        except ClientError as exc:
+            if self._is_not_found(exc):
+                raise AssetUploadNotFoundError from exc
+            if self._is_precondition_failed(exc):
+                raise InvalidAssetUploadError(
+                    "Uploaded asset changed during validation"
+                ) from exc
+            raise AssetStorageUnavailableError from exc
+        except BotoCoreError as exc:
             raise AssetStorageUnavailableError from exc
 
     async def promote_object(
@@ -210,12 +247,14 @@ class R2ObjectStorage:
         source_key: str,
         destination_key: str,
         content_type: str,
+        source_etag: str,
     ) -> None:
         await asyncio.to_thread(
             self._promote_object,
             source_key,
             destination_key,
             content_type,
+            source_etag,
         )
 
     def _delete_object(self, object_key: str) -> None:

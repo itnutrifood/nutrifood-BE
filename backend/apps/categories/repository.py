@@ -36,6 +36,10 @@ CATEGORY_COLUMNS = """
     updated_at
 """
 
+CATEGORY_HIERARCHY_LOCK_KEY = "categories:hierarchy"
+
+type CategoryDatabase = asyncpg.Connection | asyncpg.Pool
+
 
 def category_from_record(record: Mapping[str, object]) -> CategoryRead:
     return CategoryRead(
@@ -51,7 +55,15 @@ def category_from_record(record: Mapping[str, object]) -> CategoryRead:
     )
 
 
-async def category_exists(pool: asyncpg.Pool, category_id: UUID) -> bool:
+async def lock_category_hierarchy(connection: asyncpg.Connection) -> None:
+    """Serialize category parent changes for the lifetime of the current transaction."""
+    await connection.fetchval(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))",
+        CATEGORY_HIERARCHY_LOCK_KEY,
+    )
+
+
+async def category_exists(pool: CategoryDatabase, category_id: UUID) -> bool:
     row = cast(
         Mapping[str, object] | None,
         await pool.fetchrow(
@@ -61,7 +73,7 @@ async def category_exists(pool: asyncpg.Pool, category_id: UUID) -> bool:
     return bool(row and row["exists"])
 
 
-async def is_descendant(pool: asyncpg.Pool, category_id: UUID, parent_id: UUID) -> bool:
+async def is_descendant(pool: CategoryDatabase, category_id: UUID, parent_id: UUID) -> bool:
     row = cast(
         Mapping[str, object] | None,
         await pool.fetchrow(
@@ -70,7 +82,7 @@ async def is_descendant(pool: asyncpg.Pool, category_id: UUID, parent_id: UUID) 
                 SELECT id
                 FROM categories
                 WHERE parent_id = $1
-                UNION ALL
+                UNION
                 SELECT categories.id
                 FROM categories
                 INNER JOIN descendants ON categories.parent_id = descendants.id
@@ -192,7 +204,7 @@ async def list_categories(
 
 
 async def update_category(
-    pool: asyncpg.Pool,
+    pool: CategoryDatabase,
     category_id: UUID,
     payload: CategoryUpdate,
 ) -> CategoryRead:

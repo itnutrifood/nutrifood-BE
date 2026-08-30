@@ -1,14 +1,20 @@
 import re
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
+from urllib.parse import urlsplit
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        populate_by_name=True,
+    )
 
     app_name: str = "NutriFood"
     environment: str = "local"
@@ -46,7 +52,7 @@ class Settings(BaseSettings):
     admin_username: str = ""
     admin_password: str = ""
     admin_token_secret: str = ""
-    admin_token_algorithm: str = "HS256"
+    admin_token_algorithm: Literal["HS256"] = "HS256"
     admin_access_token_expire_minutes: int = Field(default=15, gt=0)
     admin_refresh_token_expire_days: int = Field(default=7, gt=0)
 
@@ -77,6 +83,37 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.environment.strip().casefold() in {"prod", "production"}
+
+    @model_validator(mode="after")
+    def validate_production_security(self) -> Self:
+        if not self.is_production:
+            return self
+
+        errors: list[str] = []
+        if self.debug:
+            errors.append("DEBUG must be false in production")
+        if self.postgres_password in {"", "nutrifood"}:
+            errors.append("POSTGRES_PASSWORD must be a non-default secret in production")
+        database_password = urlsplit(self.database_url).password
+        if database_password in {None, "", "nutrifood"}:
+            errors.append("DATABASE_URL must contain a non-default password in production")
+        if self.admin_username == "admin@mail.com":
+            errors.append("ADMIN_USERNAME must not use the published bootstrap identity")
+        if self.admin_password == "123456" or (
+            self.admin_password and len(self.admin_password) < 14
+        ):
+            errors.append("ADMIN_PASSWORD must be empty or contain at least 14 characters")
+        if (
+            len(self.admin_token_secret.encode("utf-8")) < 32
+            or self.admin_token_secret == "change-me-to-a-long-random-secret"
+        ):
+            errors.append(
+                "ADMIN_TOKEN_SECRET must contain at least 32 bytes of unique key material"
+            )
+
+        if errors:
+            raise ValueError("; ".join(errors))
+        return self
 
 
 @lru_cache

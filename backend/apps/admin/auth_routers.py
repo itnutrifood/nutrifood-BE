@@ -1,7 +1,8 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
+from backend.apps.admin.auth_rate_limit import enforce_admin_login_rate_limit
 from backend.apps.admin.auth_schemas import (
     AdminLoginRequest,
     AdminRefreshRequest,
@@ -11,8 +12,12 @@ from backend.apps.admin.auth_service import (
     login_admin as login_admin_service,
 )
 from backend.apps.admin.auth_service import (
+    logout_admin as logout_admin_service,
+)
+from backend.apps.admin.auth_service import (
     refresh_admin_token as refresh_admin_token_service,
 )
+from backend.config.cache import CacheClient
 from backend.config.database import DbPool
 from backend.config.settings import Settings, get_settings
 
@@ -25,7 +30,11 @@ async def login_admin(
     payload: AdminLoginRequest,
     settings: Annotated[Settings, Depends(get_settings)],
     pool: DbPool,
+    cache: CacheClient,
+    request: Request,
 ) -> AdminTokenPair:
+    source = request.client.host if request.client is not None else "unknown"
+    await enforce_admin_login_rate_limit(cache, payload.identifier, source)
     return await login_admin_service(pool, payload, settings)
 
 
@@ -36,3 +45,12 @@ async def refresh_admin_token(
     pool: DbPool,
 ) -> AdminTokenPair:
     return await refresh_admin_token_service(pool, payload.refresh_token, settings)
+
+
+@router.post("/logout", status_code=204)
+async def logout_admin(
+    payload: AdminRefreshRequest,
+    settings: Annotated[Settings, Depends(get_settings)],
+    pool: DbPool,
+) -> None:
+    await logout_admin_service(pool, payload.refresh_token, settings)

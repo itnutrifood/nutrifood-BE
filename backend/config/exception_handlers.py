@@ -2,6 +2,8 @@ from collections.abc import Sequence
 from typing import cast
 
 from fastapi import FastAPI, Request, status
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from backend.apps.accounts.exceptions import (
@@ -221,6 +223,30 @@ async def domain_exception_handler(_request: Request, exc: Exception) -> JSONRes
     raise exc
 
 
+async def request_validation_exception_handler(
+    _request: Request,
+    exc: Exception,
+) -> JSONResponse:
+    """Return useful validation details without reflecting submitted values.
+
+    Pydantic includes the original input in every validation error. That is useful for
+    ordinary data but unsafe for authentication payloads, where the input can contain a
+    password or refresh token. Removing ``input`` globally also keeps future secret-bearing
+    request models from accidentally reintroducing the disclosure.
+    """
+
+    validation_error = cast(RequestValidationError, exc)
+    sanitized_errors = [
+        {key: value for key, value in error.items() if key not in {"input", "ctx"}}
+        for error in validation_error.errors()
+    ]
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        content=jsonable_encoder({"detail": sanitized_errors}),
+    )
+
+
 def register_exception_handlers(app: FastAPI) -> None:
+    app.add_exception_handler(RequestValidationError, request_validation_exception_handler)
     for exception_type in DOMAIN_EXCEPTION_TYPES:
         app.add_exception_handler(exception_type, domain_exception_handler)

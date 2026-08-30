@@ -3,17 +3,57 @@ from io import BytesIO
 from typing import Any
 from uuid import UUID
 
+import pytest
 from backend.apps.admin import auth as admin_auth_module
 from backend.apps.assets import storage as storage_module
 from backend.apps.assets.dependencies import get_asset_storage
-from backend.apps.assets.exceptions import AssetUploadNotFoundError
+from backend.apps.assets.exceptions import AssetUploadNotFoundError, InvalidAssetUploadError
 from backend.apps.assets.storage import ObjectMetadata, R2ObjectStorage
 from backend.config.database import get_pool
+from botocore.exceptions import ClientError
 from fastapi.testclient import TestClient
 from PIL import Image
 
 ADMIN_ID = UUID("40000000-0000-0000-0000-000000000001")
 UPLOAD_ID = UUID("50000000-0000-0000-0000-000000000001")
+
+
+class RecordingS3Client:
+    def __init__(self, copy_error: ClientError | None = None) -> None:
+        self.copy_error = copy_error
+        self.presign_call: tuple[str, dict[str, Any], int] | None = None
+        self.copy_call: dict[str, Any] | None = None
+        self.deleted_keys: list[str] = []
+
+    def generate_presigned_url(
+        self,
+        client_method: str,
+        *,
+        Params: dict[str, Any],
+        ExpiresIn: int,
+    ) -> str:
+        self.presign_call = (client_method, Params, ExpiresIn)
+        return "https://r2.example.test/presigned-put"
+
+    def copy_object(self, **kwargs: Any) -> None:
+        self.copy_call = kwargs
+        if self.copy_error is not None:
+            raise self.copy_error
+
+    def delete_object(self, *, Bucket: str, Key: str) -> None:
+        assert Bucket == "assets"
+        self.deleted_keys.append(Key)
+
+
+def create_r2_storage(monkeypatch: Any, client: RecordingS3Client) -> R2ObjectStorage:
+    monkeypatch.setattr(storage_module.boto3, "client", lambda **_kwargs: client)
+    return R2ObjectStorage(
+        endpoint_url="https://account.r2.cloudflarestorage.com",
+        access_key_id="access-key",
+        secret_access_key="secret-key",
+        bucket_name="assets",
+        public_base_url="https://assets.example.test",
+    )
 
 
 def test_r2_storage_extracts_only_canonical_public_object_keys(monkeypatch: Any) -> None:
@@ -40,6 +80,78 @@ def test_r2_storage_extracts_only_canonical_public_object_keys(monkeypatch: Any)
     ) is None
 
 
+def test_r2_upload_url_signs_the_declared_content_length(monkeypatch: Any) -> None:
+    client = RecordingS3Client()
+    storage = create_r2_storage(monkeypatch, client)
+
+    upload_url = storage.create_upload_url(
+        "pending/products/images/upload-id",
+        "image/png",
+        204_800,
+        900,
+    )
+
+    assert upload_url == "https://r2.example.test/presigned-put"
+    assert client.presign_call == (
+        "put_object",
+        {
+            "Bucket": "assets",
+            "Key": "pending/products/images/upload-id",
+            "ContentType": "image/png",
+            "ContentLength": 204_800,
+        },
+        900,
+    )
+
+
+def test_r2_promotion_is_conditional_on_the_validated_etag(monkeypatch: Any) -> None:
+    client = RecordingS3Client()
+    storage = create_r2_storage(monkeypatch, client)
+
+    storage._promote_object(
+        "pending/products/images/upload-id",
+        "products/images/upload-id.png",
+        "image/png",
+        '"validated-etag"',
+    )
+
+    assert client.copy_call == {
+        "Bucket": "assets",
+        "Key": "products/images/upload-id.png",
+        "CopySource": {
+            "Bucket": "assets",
+            "Key": "pending/products/images/upload-id",
+        },
+        "CopySourceIfMatch": '"validated-etag"',
+        "ContentType": "image/png",
+        "CacheControl": "public, max-age=31536000, immutable",
+        "MetadataDirective": "REPLACE",
+    }
+    assert client.deleted_keys == ["pending/products/images/upload-id"]
+
+
+def test_r2_promotion_treats_a_replaced_source_as_an_invalid_upload(monkeypatch: Any) -> None:
+    precondition_error = ClientError(
+        {
+            "Error": {"Code": "PreconditionFailed", "Message": "ETag does not match"},
+            "ResponseMetadata": {"HTTPStatusCode": 412},
+        },
+        "CopyObject",
+    )
+    client = RecordingS3Client(copy_error=precondition_error)
+    storage = create_r2_storage(monkeypatch, client)
+
+    with pytest.raises(InvalidAssetUploadError, match="changed during validation"):
+        storage._promote_object(
+            "pending/products/images/upload-id",
+            "products/images/upload-id.png",
+            "image/png",
+            '"validated-etag"',
+        )
+
+    assert client.deleted_keys == []
+
+
 class DummyPool:
     async def close(self) -> None:
         return None
@@ -58,14 +170,23 @@ def png_bytes(width: int = 32, height: int = 24) -> bytes:
 class FakeAssetStorage:
     def __init__(self, data: bytes) -> None:
         self.data = data
-        self.created_upload: tuple[str, str, int] | None = None
-        self.promoted: tuple[str, str, str] | None = None
+        self.etag = '"test-etag"'
+        self.created_upload: tuple[str, str, int, int] | None = None
+        self.promoted: tuple[str, str, str, str] | None = None
         self.deleted: list[str] = []
         self.staging_exists = True
         self.final_exists = False
+        self.replace_after_read = False
+        self.promotion_attempted = False
 
-    def create_upload_url(self, object_key: str, content_type: str, expires_in: int) -> str:
-        self.created_upload = (object_key, content_type, expires_in)
+    def create_upload_url(
+        self,
+        object_key: str,
+        content_type: str,
+        size_bytes: int,
+        expires_in: int,
+    ) -> str:
+        self.created_upload = (object_key, content_type, size_bytes, expires_in)
         return "https://r2.example.test/presigned-put"
 
     def public_url(self, object_key: str) -> str:
@@ -79,21 +200,29 @@ class FakeAssetStorage:
         return ObjectMetadata(
             content_type="image/png",
             size_bytes=len(self.data),
-            etag='"test-etag"',
+            etag=self.etag,
         )
 
     async def read_object(self, object_key: str, etag: str, max_bytes: int) -> bytes:
-        assert etag == '"test-etag"'
+        assert etag == self.etag
         assert max_bytes == 5 * 1024 * 1024
-        return self.data
+        data = self.data
+        if self.replace_after_read and object_key.startswith("pending/"):
+            self.data = b"replacement uploaded after validation"
+            self.etag = '"replacement-etag"'
+        return data
 
     async def promote_object(
         self,
         source_key: str,
         destination_key: str,
         content_type: str,
+        source_etag: str,
     ) -> None:
-        self.promoted = (source_key, destination_key, content_type)
+        self.promotion_attempted = True
+        if source_etag != self.etag:
+            raise InvalidAssetUploadError("Uploaded asset changed during validation")
+        self.promoted = (source_key, destination_key, content_type, source_etag)
         self.staging_exists = False
         self.final_exists = True
 
@@ -142,11 +271,15 @@ def test_admin_can_create_product_image_upload(monkeypatch: Any) -> None:
     assert response.json()["purpose"] == "product_image"
     assert response.json()["upload_url"] == "https://r2.example.test/presigned-put"
     assert response.json()["method"] == "PUT"
-    assert response.json()["headers"] == {"Content-Type": "image/png"}
+    assert response.json()["headers"] == {
+        "Content-Type": "image/png",
+        "Content-Length": str(len(storage.data)),
+    }
     assert datetime.fromisoformat(response.json()["expires_at"]) > before_request
     assert storage.created_upload == (
         f"pending/products/images/{UPLOAD_ID}",
         "image/png",
+        len(storage.data),
         900,
     )
 
@@ -184,6 +317,7 @@ def test_admin_can_complete_product_image_upload(monkeypatch: Any) -> None:
         f"pending/products/images/{UPLOAD_ID}",
         final_key,
         "image/png",
+        '"test-etag"',
     )
 
 
@@ -254,6 +388,32 @@ def test_complete_product_image_rejects_size_mismatch(monkeypatch: Any) -> None:
 
     assert response.status_code == 422
     assert response.json() == {"detail": "Uploaded asset size does not match the request"}
+    assert storage.deleted == [f"pending/products/images/{UPLOAD_ID}"]
+
+
+def test_complete_product_image_rejects_replacement_after_validation(monkeypatch: Any) -> None:
+    storage = FakeAssetStorage(png_bytes())
+    storage.replace_after_read = True
+    app = configure_test_app(monkeypatch, storage)
+
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                f"/api/v1/admin/assets/uploads/{UPLOAD_ID}/complete",
+                json={
+                    "purpose": "product_image",
+                    "content_type": "image/png",
+                    "size_bytes": len(png_bytes()),
+                },
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Uploaded asset changed during validation"}
+    assert storage.promotion_attempted is True
+    assert storage.promoted is None
+    assert storage.final_exists is False
     assert storage.deleted == [f"pending/products/images/{UPLOAD_ID}"]
 
 

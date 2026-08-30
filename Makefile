@@ -4,7 +4,7 @@ DOCKER_COMPOSE ?= docker compose
 
 help:
 	@printf "NutriFood commands:\n"
-	@printf "  make init             Copy .env.example to .env when missing\n"
+	@printf "  make init             Generate a secure .env when missing\n"
 	@printf "  make build            Build Docker images\n"
 	@printf "  make up               Start the stack\n"
 	@printf "  make down             Stop the stack\n"
@@ -24,7 +24,7 @@ help:
 	@printf "  make test             Run tests\n"
 
 init:
-	@test -f .env || cp .env.example .env
+	@python3 scripts/init_env.py
 
 build:
 	$(DOCKER_COMPOSE) build
