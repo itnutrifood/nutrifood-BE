@@ -6,6 +6,7 @@ from backend.apps.assets.admin_routers import router as assets_router
 from backend.apps.categories.admin_routers import router as categories_router
 from backend.apps.contacts.admin_routers import router as contact_messages_router
 from backend.apps.faqs.admin_routers import router as faqs_router
+from backend.apps.ingredients.admin_routers import router as ingredients_router
 from backend.apps.open_positions.admin_routers import router as open_positions_router
 from backend.apps.orders.admin_routers import router as orders_router
 from backend.apps.products.admin_routers import router as products_router
@@ -29,6 +30,7 @@ protected_router.include_router(categories_router)
 protected_router.include_router(assets_router)
 protected_router.include_router(contact_messages_router)
 protected_router.include_router(faqs_router)
+protected_router.include_router(ingredients_router)
 protected_router.include_router(open_positions_router)
 protected_router.include_router(orders_router)
 protected_router.include_router(products_router)

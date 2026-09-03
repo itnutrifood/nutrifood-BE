@@ -39,6 +39,10 @@ from backend.apps.common.exceptions import InvalidCursorError
 from backend.apps.contacts.exceptions import ContactMessageNotFoundError
 from backend.apps.faqs.exceptions import DuplicateFAQSlugError, FAQNotFoundError
 from backend.apps.favorites.exceptions import FavoriteProductNotFoundError
+from backend.apps.ingredients.exceptions import (
+    DuplicateIngredientNameError,
+    IngredientNotFoundError,
+)
 from backend.apps.notifications.exceptions import FcmRegistrationNotFoundError
 from backend.apps.open_positions.exceptions import OpenPositionNotFoundError
 from backend.apps.orders.exceptions import OrderNotFoundError
@@ -76,6 +80,8 @@ DOMAIN_EXCEPTION_TYPES: tuple[type[Exception], ...] = (
     CategoryFilterConflictError,
     FAQNotFoundError,
     DuplicateFAQSlugError,
+    IngredientNotFoundError,
+    DuplicateIngredientNameError,
     OpenPositionNotFoundError,
     ProductNotFoundError,
     ProductCategoryNotFoundError,
@@ -169,6 +175,10 @@ async def domain_exception_handler(_request: Request, exc: Exception) -> JSONRes
         return _not_found("FAQ not found")
     if isinstance(exc, DuplicateFAQSlugError):
         return _conflict("FAQ slug already exists")
+    if isinstance(exc, IngredientNotFoundError):
+        return _not_found("Ingredient not found")
+    if isinstance(exc, DuplicateIngredientNameError):
+        return _conflict("Ingredient already exists")
     if isinstance(exc, OpenPositionNotFoundError):
         return _not_found("Open position not found")
     if isinstance(exc, ProductNotFoundError):
