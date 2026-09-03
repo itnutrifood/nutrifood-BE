@@ -88,6 +88,11 @@ async def place_order(
                     a.building_number,
                     a.entrance,
                     a.floor,
+                    a.apartment,
+                    a.latitude,
+                    a.longitude,
+                    a.formatted_address,
+                    a.location_source,
                     u.first_name,
                     u.last_name,
                     u.email
@@ -151,6 +156,11 @@ async def place_order(
                     delivery_building_number,
                     delivery_entrance,
                     delivery_floor,
+                    delivery_apartment,
+                    delivery_latitude,
+                    delivery_longitude,
+                    delivery_formatted_address,
+                    delivery_location_source,
                     requested_delivery_at,
                     delivery_notes,
                     idempotency_key,
@@ -158,7 +168,7 @@ async def place_order(
                 )
                 VALUES (
                     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-                    $15, $16, $17, $18, $19, $20
+                    $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25
                 )
                 RETURNING {ORDER_COLUMNS.replace("o.", "")}
                 """,
@@ -178,6 +188,11 @@ async def place_order(
                 address["building_number"],
                 address["entrance"],
                 address["floor"],
+                address["apartment"],
+                address["latitude"],
+                address["longitude"],
+                address["formatted_address"],
+                address["location_source"],
                 payload.requested_delivery_at,
                 payload.delivery_notes,
                 idempotency_key,

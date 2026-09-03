@@ -16,6 +16,7 @@ FRAMEWORK_LOGGERS = (
     "celery",
     "celery.task",
 )
+SENSITIVE_HTTP_LOGGERS = ("httpx", "httpcore")
 LOG_LEVELS = {
     "DEBUG": logging.DEBUG,
     "INFO": logging.INFO,
@@ -90,5 +91,10 @@ def configure_logging(settings: Settings | None = None) -> None:
             handler.close()
         framework_logger.setLevel(level)
         framework_logger.propagate = True
+
+    # HTTPX logs complete request URLs at INFO. The Yandex Geocoder key is a query
+    # parameter, so keep these transport logs below WARNING even in debug mode.
+    for logger_name in SENSITIVE_HTTP_LOGGERS:
+        logging.getLogger(logger_name).setLevel(logging.WARNING)
 
     logging.captureWarnings(True)

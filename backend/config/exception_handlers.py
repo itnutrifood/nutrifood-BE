@@ -52,7 +52,12 @@ from backend.apps.subscriptions.exceptions import (
     SubscriptionPlanNotFoundError,
 )
 from backend.apps.testimonials.exceptions import TestimonialNotFoundError
-from backend.apps.users.addresses.exceptions import AddressNotFoundError
+from backend.apps.users.addresses.exceptions import (
+    AddressGeocodingNotConfiguredError,
+    AddressGeocodingUnavailableError,
+    AddressNotFoundError,
+    InvalidAddressLocationError,
+)
 
 DOMAIN_EXCEPTION_TYPES: tuple[type[Exception], ...] = (
     AuthenticationError,
@@ -86,6 +91,9 @@ DOMAIN_EXCEPTION_TYPES: tuple[type[Exception], ...] = (
     FavoriteProductNotFoundError,
     FcmRegistrationNotFoundError,
     AddressNotFoundError,
+    AddressGeocodingNotConfiguredError,
+    AddressGeocodingUnavailableError,
+    InvalidAddressLocationError,
     OrderNotFoundError,
     AssetStorageNotConfiguredError,
     AssetStorageUnavailableError,
@@ -198,6 +206,21 @@ async def domain_exception_handler(_request: Request, exc: Exception) -> JSONRes
         return _not_found("No FCM registration found for the current user")
     if isinstance(exc, AddressNotFoundError):
         return _not_found("Address not found")
+    if isinstance(exc, AddressGeocodingNotConfiguredError):
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"detail": "Address lookup is not configured"},
+        )
+    if isinstance(exc, AddressGeocodingUnavailableError):
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"detail": "Address lookup is temporarily unavailable"},
+        )
+    if isinstance(exc, InvalidAddressLocationError):
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            content={"detail": exc.detail},
+        )
     if isinstance(exc, OrderNotFoundError):
         return _not_found("Order not found")
     if isinstance(exc, AssetStorageNotConfiguredError):

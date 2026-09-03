@@ -8,7 +8,8 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, StringConstraints
 from backend.apps.common.enums import OrderStatus, PaymentMethod, PaymentStatus
 from backend.apps.common.pagination import Page
 from backend.apps.products.schemas import LocalizedText
-from backend.apps.users.addresses.enums import ArmeniaRegion, Country
+from backend.apps.users.addresses.enums import AddressLocationSource, ArmeniaRegion, Country
+from backend.apps.users.addresses.schemas import AddressLocation
 
 ContactPhone = Annotated[
     str,
@@ -47,6 +48,10 @@ class DeliveryAddressSnapshot(BaseModel):
     building_number: str
     entrance: str | None
     floor: str | None
+    apartment: str | None
+    formatted_address: str | None
+    location: AddressLocation | None
+    location_source: AddressLocationSource
 
 
 class OrderItemRead(BaseModel):

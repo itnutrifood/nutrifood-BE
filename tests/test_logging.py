@@ -5,7 +5,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-from backend.config.logging import LOG_FORMAT, UTCFormatter, create_daily_file_handler
+from backend.config.logging import (
+    LOG_FORMAT,
+    UTCFormatter,
+    configure_logging,
+    create_daily_file_handler,
+)
 from backend.config.settings import Settings
 
 
@@ -123,3 +128,19 @@ logging.shutdown()
 
     contents = (tmp_path / "worker.log").read_text(encoding="utf-8")
     assert contents.count("concurrent-marker") == 60
+
+
+def test_http_client_info_logs_are_suppressed_to_protect_query_secrets(
+    tmp_path: Path,
+) -> None:
+    configure_logging(
+        Settings(
+            _env_file=None,
+            log_directory=tmp_path,
+            log_component="sensitive-http",
+            log_level="DEBUG",
+        )
+    )
+
+    assert logging.getLogger("httpx").level == logging.WARNING
+    assert logging.getLogger("httpcore").level == logging.WARNING

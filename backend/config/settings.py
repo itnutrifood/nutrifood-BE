@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     )
     catalog_currency: str = Field(default="USD", pattern=r"^[A-Z]{3}$")
 
+    yandex_geocoder_api_key: str = ""
+    yandex_geocoder_base_url: str = "https://geocode-maps.yandex.ru/v1/"
+    yandex_geocoder_language: Literal["en_RU", "ru_RU"] = "en_RU"
+    yandex_geocoder_timeout_seconds: float = Field(default=5.0, gt=0, le=30)
+    yandex_geocoder_max_distance_meters: float = Field(default=250.0, gt=0, le=5000)
+
     celery_broker_url: str = "redis://redis:6379/0"
     celery_result_backend: str = "redis://redis:6379/1"
     celery_timezone: str = "UTC"

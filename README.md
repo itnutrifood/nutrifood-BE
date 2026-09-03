@@ -431,6 +431,81 @@ The bulk `PUT` is intended for syncing a locally stored guest cart after login. 
 upserts all supplied quantities atomically and leaves other existing cart items in
 place. Server-side cart endpoints require a Firebase ID token.
 
+## Yandex address picker
+
+New delivery addresses are created from a Yandex map location rather than client-provided
+country, region, city, street, and building strings. The backend reverse-geocodes the
+coordinates, accepts only a house-level address in Armenia, normalizes the result, and
+stores both the selected pin and human-readable address.
+
+Configure the server-side HTTP Geocoder client:
+
+```sh
+YANDEX_GEOCODER_API_KEY=<server-side-key>
+YANDEX_GEOCODER_BASE_URL=https://geocode-maps.yandex.ru/v1/
+YANDEX_GEOCODER_LANGUAGE=en_RU
+YANDEX_GEOCODER_TIMEOUT_SECONDS=5
+YANDEX_GEOCODER_MAX_DISTANCE_METERS=250
+```
+
+The key is sent as a query parameter. Restrict it to backend IPs where supported and do
+not log outgoing HTTPX request URLs. The configured base URL can be replaced with the
+commercial endpoint supplied by Yandex.
+
+Saving Yandex Geocoder results requires the extended/advanced Yandex Maps license or
+other written permission that permits persistence. The free and standard licenses do
+not permit saving API-derived data.
+
+All address endpoints require a Firebase bearer token. Preview a selected point before
+showing the confirmation action:
+
+```http
+POST /api/v1/users/addresses/resolve
+Authorization: Bearer <firebase-id-token>
+Content-Type: application/json
+
+{
+  "latitude": 40.1811,
+  "longitude": 44.5136
+}
+```
+
+Create the address after confirmation. Derived address strings are intentionally not
+accepted from the client:
+
+```http
+POST /api/v1/users/addresses
+Authorization: Bearer <firebase-id-token>
+Content-Type: application/json
+
+{
+  "location": {
+    "latitude": 40.1811,
+    "longitude": 44.5136
+  },
+  "label": "Home",
+  "entrance": "2",
+  "floor": "5",
+  "apartment": "17",
+  "is_default": true
+}
+```
+
+The optional `label` is free user-entered text up to 32 characters, such as `Home`,
+`Office`, or `Parents`. It is nullable and is not unique per user. Existing rows receive
+`null` when the migration is applied.
+
+`PATCH /api/v1/users/addresses/{address_id}` accepts `location`, `label`, `entrance`,
+`floor`, `apartment`, and `is_default`. Updating `location` triggers a fresh
+reverse-geocoding request and atomically replaces every map-derived field. Updating only
+the label or delivery details does not call Yandex. Existing manual addresses remain
+readable with `location: null`, `location_source: "manual"`, and `label: null`; users
+can migrate them by patching a selected map location.
+
+Yandex uses `[longitude, latitude]` in its JavaScript map APIs. This backend deliberately
+uses named `{latitude, longitude}` properties to prevent accidental coordinate reversal.
+See `FRONTEND_YANDEX_ADDRESS_PICKER_GUIDE.md` for the complete client contract.
+
 ## Checkout and orders
 
 Authenticated users place every current cart item in one request. The checkout uses the
@@ -465,7 +540,8 @@ clears the purchased cart rows in one database transaction. Address edits, produ
 and later product deletion therefore do not rewrite order history. Configure the catalog
 and order currency with `CATALOG_CURRENCY` (an uppercase ISO 4217 code, default `USD`). The
 current product model has no inventory field, so this flow does not claim or decrement
-stock.
+stock. Address snapshots include `formatted_address`, `location`, `location_source`, and
+`apartment`, so the original delivery pin survives later address edits or deletion.
 
 Users can read their own order history and details:
 

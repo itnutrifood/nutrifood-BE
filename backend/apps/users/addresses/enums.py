@@ -17,3 +17,8 @@ class ArmeniaRegion(StrEnum):
     TAVUSH = "Tavush"
     VAYOTS_DZOR = "Vayots Dzor"
     YEREVAN = "Yerevan"
+
+
+class AddressLocationSource(StrEnum):
+    MANUAL = "manual"
+    YANDEX = "yandex"

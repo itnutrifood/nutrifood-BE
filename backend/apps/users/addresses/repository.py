@@ -1,17 +1,29 @@
 from collections.abc import Mapping, Sequence
 from datetime import datetime
+from decimal import Decimal
 from typing import Any, cast
 from uuid import UUID
 
 import asyncpg
 
 from backend.apps.common.db import rows_affected
-from backend.apps.users.addresses.enums import ArmeniaRegion, Country
+from backend.apps.users.addresses.enums import (
+    AddressLocationSource,
+    ArmeniaRegion,
+    Country,
+)
 from backend.apps.users.addresses.exceptions import AddressNotFoundError
-from backend.apps.users.addresses.schemas import AddressCreate, AddressRead, AddressUpdate
+from backend.apps.users.addresses.geocoding import ResolvedAddress
+from backend.apps.users.addresses.schemas import (
+    AddressCreate,
+    AddressLocation,
+    AddressRead,
+    AddressUpdate,
+)
 
 ADDRESS_COLUMNS = """
     id,
+    label,
     country,
     region::text AS region,
     city,
@@ -19,15 +31,32 @@ ADDRESS_COLUMNS = """
     building_number,
     entrance,
     floor,
+    apartment,
+    latitude,
+    longitude,
+    formatted_address,
+    location_source,
+    provider_uri,
+    geocode_kind,
+    geocode_precision,
     is_default,
     created_at,
     updated_at
 """
 
 
+def _optional_float(value: object) -> float | None:
+    if value is None:
+        return None
+    return float(cast(Decimal | float, value))
+
+
 def address_from_record(record: Mapping[str, object]) -> AddressRead:
+    latitude = _optional_float(record["latitude"])
+    longitude = _optional_float(record["longitude"])
     return AddressRead(
         id=cast(UUID, record["id"]),
+        label=cast(str | None, record["label"]),
         country=Country(cast(str, record["country"])),
         region=ArmeniaRegion(cast(str, record["region"])),
         city=cast(str, record["city"]),
@@ -35,6 +64,15 @@ def address_from_record(record: Mapping[str, object]) -> AddressRead:
         building_number=cast(str, record["building_number"]),
         entrance=cast(str | None, record["entrance"]),
         floor=cast(str | None, record["floor"]),
+        apartment=cast(str | None, record["apartment"]),
+        formatted_address=cast(str | None, record["formatted_address"]),
+        location=(
+            AddressLocation(latitude=latitude, longitude=longitude)
+            if latitude is not None and longitude is not None
+            else None
+        ),
+        location_source=AddressLocationSource(cast(str, record["location_source"])),
+        geocode_precision=cast(str | None, record["geocode_precision"]),
         is_default=cast(bool, record["is_default"]),
         created_at=cast(datetime, record["created_at"]),
         updated_at=cast(datetime, record["updated_at"]),
@@ -45,6 +83,7 @@ async def _insert_address(
     connection: asyncpg.Connection | asyncpg.Pool,
     user_id: UUID,
     payload: AddressCreate,
+    resolved: ResolvedAddress,
 ) -> AddressRead:
     row = cast(
         Mapping[str, object] | None,
@@ -59,19 +98,40 @@ async def _insert_address(
                 building_number,
                 entrance,
                 floor,
+                apartment,
+                latitude,
+                longitude,
+                formatted_address,
+                location_source,
+                provider_uri,
+                geocode_kind,
+                geocode_precision,
+                label,
                 is_default
             )
-            VALUES ($1, $2, $3::armenia_region, $4, $5, $6, $7, $8, $9)
+            VALUES (
+                $1, $2, $3::armenia_region, $4, $5, $6, $7, $8, $9, $10, $11,
+                $12, $13, $14, $15, $16, $17, $18
+            )
             RETURNING {ADDRESS_COLUMNS}
             """,
             user_id,
-            payload.country.value,
-            payload.region.value,
-            payload.city,
-            payload.street,
-            payload.building_number,
+            resolved.country.value,
+            resolved.region.value,
+            resolved.city,
+            resolved.street,
+            resolved.building_number,
             payload.entrance,
             payload.floor,
+            payload.apartment,
+            Decimal(str(resolved.latitude)),
+            Decimal(str(resolved.longitude)),
+            resolved.formatted_address,
+            AddressLocationSource.YANDEX.value,
+            resolved.provider_uri,
+            resolved.geocode_kind,
+            resolved.geocode_precision,
+            payload.label,
             payload.is_default,
         ),
     )
@@ -94,9 +154,10 @@ async def create_address(
     pool: asyncpg.Pool,
     user_id: UUID,
     payload: AddressCreate,
+    resolved: ResolvedAddress,
 ) -> AddressRead:
     if not payload.is_default:
-        return await _insert_address(pool, user_id, payload)
+        return await _insert_address(pool, user_id, payload, resolved)
 
     async with pool.acquire() as connection, connection.transaction():
         await _lock_default_address_changes(connection, user_id)
@@ -108,7 +169,7 @@ async def create_address(
             """,
             user_id,
         )
-        return await _insert_address(connection, user_id, payload)
+        return await _insert_address(connection, user_id, payload, resolved)
 
 
 async def list_addresses(pool: asyncpg.Pool, user_id: UUID) -> list[AddressRead]:
@@ -154,17 +215,36 @@ async def _update_address(
     user_id: UUID,
     address_id: UUID,
     payload: AddressUpdate,
+    resolved: ResolvedAddress | None,
 ) -> AddressRead:
     assignments: list[str] = []
     params: list[Any] = []
 
-    if "country" in payload.model_fields_set:
-        params.append(cast(Country, payload.country).value)
-        assignments.append(f"country = ${len(params)}")
-    if "region" in payload.model_fields_set:
-        params.append(cast(ArmeniaRegion, payload.region).value)
-        assignments.append(f"region = ${len(params)}::armenia_region")
-    for field_name in ("city", "street", "building_number", "entrance", "floor"):
+    if resolved is not None:
+        location_values: tuple[tuple[str, object], ...] = (
+            ("country", resolved.country.value),
+            ("region", resolved.region.value),
+            ("city", resolved.city),
+            ("street", resolved.street),
+            ("building_number", resolved.building_number),
+            ("latitude", Decimal(str(resolved.latitude))),
+            ("longitude", Decimal(str(resolved.longitude))),
+            ("formatted_address", resolved.formatted_address),
+            ("location_source", AddressLocationSource.YANDEX.value),
+            ("provider_uri", resolved.provider_uri),
+            ("geocode_kind", resolved.geocode_kind),
+            ("geocode_precision", resolved.geocode_precision),
+        )
+        for field_name, value in location_values:
+            params.append(value)
+            cast_suffix = "::armenia_region" if field_name == "region" else ""
+            assignments.append(f"{field_name} = ${len(params)}{cast_suffix}")
+
+    if "label" in payload.model_fields_set:
+        params.append(payload.label)
+        assignments.append(f"label = ${len(params)}")
+
+    for field_name in ("entrance", "floor", "apartment"):
         if field_name in payload.model_fields_set:
             params.append(getattr(payload, field_name))
             assignments.append(f"{field_name} = ${len(params)}")
@@ -195,9 +275,10 @@ async def update_address(
     user_id: UUID,
     address_id: UUID,
     payload: AddressUpdate,
+    resolved: ResolvedAddress | None,
 ) -> AddressRead:
     if payload.is_default is not True:
-        return await _update_address(pool, user_id, address_id, payload)
+        return await _update_address(pool, user_id, address_id, payload, resolved)
 
     async with pool.acquire() as connection, connection.transaction():
         await _lock_default_address_changes(connection, user_id)
@@ -210,7 +291,7 @@ async def update_address(
             user_id,
             address_id,
         )
-        return await _update_address(connection, user_id, address_id, payload)
+        return await _update_address(connection, user_id, address_id, payload, resolved)
 
 
 async def delete_address(

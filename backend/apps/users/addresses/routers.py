@@ -4,12 +4,20 @@ from fastapi import APIRouter, Response
 from fastapi import status as http_status
 
 from backend.apps.accounts.dependencies import RequireAuth
-from backend.apps.users.addresses.schemas import AddressCreate, AddressRead, AddressUpdate
+from backend.apps.users.addresses.geocoding import AddressGeocoderDependency
+from backend.apps.users.addresses.schemas import (
+    AddressCreate,
+    AddressLocation,
+    AddressRead,
+    AddressResolutionRead,
+    AddressUpdate,
+)
 from backend.apps.users.addresses.service import (
     create_address,
     delete_address,
     get_address,
     list_addresses,
+    resolve_address,
     update_address,
 )
 from backend.config.database import DbPool
@@ -17,13 +25,23 @@ from backend.config.database import DbPool
 router = APIRouter(prefix="/addresses", tags=["addresses"])
 
 
+@router.post("/resolve", response_model=AddressResolutionRead)
+async def resolve_user_address_location(
+    payload: AddressLocation,
+    _current_user: RequireAuth,
+    geocoder: AddressGeocoderDependency,
+) -> AddressResolutionRead:
+    return await resolve_address(geocoder, payload)
+
+
 @router.post("", response_model=AddressRead, status_code=http_status.HTTP_201_CREATED)
 async def create_user_address(
     payload: AddressCreate,
     current_user: RequireAuth,
     pool: DbPool,
+    geocoder: AddressGeocoderDependency,
 ) -> AddressRead:
-    return await create_address(pool, current_user.id, payload)
+    return await create_address(pool, geocoder, current_user.id, payload)
 
 
 @router.get("", response_model=list[AddressRead])
@@ -49,8 +67,9 @@ async def update_user_address(
     payload: AddressUpdate,
     current_user: RequireAuth,
     pool: DbPool,
+    geocoder: AddressGeocoderDependency,
 ) -> AddressRead:
-    return await update_address(pool, current_user.id, address_id, payload)
+    return await update_address(pool, geocoder, current_user.id, address_id, payload)
 
 
 @router.delete("/{address_id}", status_code=http_status.HTTP_204_NO_CONTENT)

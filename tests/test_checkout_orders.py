@@ -17,6 +17,8 @@ ORDER_ITEM_ID = UUID("71000000-0000-0000-0000-000000000001")
 PRODUCT_ID = UUID("10000000-0000-0000-0000-000000000001")
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 REQUESTED_DELIVERY_AT = datetime(2026, 9, 3, 14, 0, tzinfo=UTC)
+DELIVERY_LATITUDE = Decimal("40.181100")
+DELIVERY_LONGITUDE = Decimal("44.513600")
 
 
 class DummyPool:
@@ -80,6 +82,11 @@ def order_record(
         "delivery_building_number": "10/1",
         "delivery_entrance": "2",
         "delivery_floor": "5",
+        "delivery_apartment": "17",
+        "delivery_latitude": DELIVERY_LATITUDE,
+        "delivery_longitude": DELIVERY_LONGITUDE,
+        "delivery_formatted_address": "Armenia, Yerevan, Northern Avenue, 10/1",
+        "delivery_location_source": "yandex",
         "requested_delivery_at": requested_delivery_at,
         "delivery_notes": "Call on arrival",
         "request_fingerprint": request_fingerprint,
@@ -159,6 +166,11 @@ class CheckoutPool:
                 "building_number": "10/1",
                 "entrance": "2",
                 "floor": "5",
+                "apartment": "17",
+                "latitude": DELIVERY_LATITUDE,
+                "longitude": DELIVERY_LONGITUDE,
+                "formatted_address": "Armenia, Yerevan, Northern Avenue, 10/1",
+                "location_source": "yandex",
                 "first_name": "Jane",
                 "last_name": "Doe",
                 "email": "jane@example.com",
@@ -169,13 +181,18 @@ class CheckoutPool:
             assert args[2] == Decimal("25.98")
             assert args[3] == "USD"
             assert args[8] == ADDRESS_ID
-            assert args[16] == self.requested_delivery_at
-            assert args[18] == "checkout-attempt-1"
-            self.idempotency_key = str(args[18])
+            assert args[16] == "17"
+            assert args[17] == DELIVERY_LATITUDE
+            assert args[18] == DELIVERY_LONGITUDE
+            assert args[19] == "Armenia, Yerevan, Northern Avenue, 10/1"
+            assert args[20] == "yandex"
+            assert args[21] == self.requested_delivery_at
+            assert args[23] == "checkout-attempt-1"
+            self.idempotency_key = str(args[23])
             self.stored_order = order_record(
                 payment_method=str(args[1]),
-                request_fingerprint=str(args[19]),
-                requested_delivery_at=args[16],  # type: ignore[arg-type]
+                request_fingerprint=str(args[24]),
+                requested_delivery_at=args[21],  # type: ignore[arg-type]
             )
             self.order_insert_count += 1
             return self.stored_order
@@ -312,6 +329,14 @@ def test_place_order_snapshots_server_totals_clears_cart_and_replays_safely(
     assert first_response.json()["subtotal"] == "25.98"
     assert first_response.json()["payment_status"] == "unpaid"
     assert first_response.json()["requested_delivery_at"] == "2026-09-03T14:00:00Z"
+    assert first_response.json()["delivery_address"]["formatted_address"] == (
+        "Armenia, Yerevan, Northern Avenue, 10/1"
+    )
+    assert first_response.json()["delivery_address"]["location"] == {
+        "latitude": 40.1811,
+        "longitude": 44.5136,
+    }
+    assert first_response.json()["delivery_address"]["apartment"] == "17"
     assert first_response.json()["items"][0]["product_title"]["EN-US"] == ("Mediterranean Bowl")
     assert pool.order_insert_count == 1
     assert pool.cart_read_count == 1
@@ -461,6 +486,10 @@ def test_user_order_history_is_scoped_and_detail_keeps_snapshots(monkeypatch: An
     assert pool.list_args == (USER_ID, "pending", 10, 10)
     assert detail_response.status_code == 200
     assert detail_response.json()["delivery_address"]["street"] == "Northern Avenue"
+    assert detail_response.json()["delivery_address"]["location"] == {
+        "latitude": 40.1811,
+        "longitude": 44.5136,
+    }
     assert pool.detail_query is not None and "o.user_id = $2" in pool.detail_query
     assert pool.detail_args == (ORDER_ID, USER_ID)
 

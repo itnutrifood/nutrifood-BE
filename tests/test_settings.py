@@ -72,6 +72,25 @@ def test_catalog_currency_is_loaded_and_validated(monkeypatch: pytest.MonkeyPatc
         Settings(_env_file=None, catalog_currency="usd")
 
 
+def test_yandex_geocoder_settings_are_loaded_and_validated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("YANDEX_GEOCODER_API_KEY", "server-key")
+    monkeypatch.setenv("YANDEX_GEOCODER_LANGUAGE", "ru_RU")
+    monkeypatch.setenv("YANDEX_GEOCODER_TIMEOUT_SECONDS", "3.5")
+    monkeypatch.setenv("YANDEX_GEOCODER_MAX_DISTANCE_METERS", "175")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.yandex_geocoder_api_key == "server-key"
+    assert settings.yandex_geocoder_language == "ru_RU"
+    assert settings.yandex_geocoder_timeout_seconds == 3.5
+    assert settings.yandex_geocoder_max_distance_meters == 175
+
+    with pytest.raises(ValueError):
+        Settings(_env_file=None, yandex_geocoder_language="hy_AM")
+
+
 def test_logging_settings_are_loaded_from_environment(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

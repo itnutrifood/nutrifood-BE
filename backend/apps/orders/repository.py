@@ -18,7 +18,8 @@ from backend.apps.orders.schemas import (
     OrderSummaryRead,
 )
 from backend.apps.products.schemas import LocalizedText
-from backend.apps.users.addresses.enums import ArmeniaRegion, Country
+from backend.apps.users.addresses.enums import AddressLocationSource, ArmeniaRegion, Country
+from backend.apps.users.addresses.schemas import AddressLocation
 
 ORDER_COLUMNS = """
     o.id,
@@ -43,6 +44,11 @@ ORDER_COLUMNS = """
     o.delivery_building_number,
     o.delivery_entrance,
     o.delivery_floor,
+    o.delivery_apartment,
+    o.delivery_latitude,
+    o.delivery_longitude,
+    o.delivery_formatted_address,
+    o.delivery_location_source,
     o.requested_delivery_at,
     o.delivery_notes,
     o.request_fingerprint,
@@ -100,6 +106,8 @@ def order_from_records(
     item_records: Sequence[Mapping[str, object]],
 ) -> OrderRead:
     summary = order_summary_from_record(order_record)
+    latitude_value = cast(Decimal | None, order_record["delivery_latitude"])
+    longitude_value = cast(Decimal | None, order_record["delivery_longitude"])
     return OrderRead(
         **summary.model_dump(),
         delivery_address=DeliveryAddressSnapshot(
@@ -110,6 +118,19 @@ def order_from_records(
             building_number=cast(str, order_record["delivery_building_number"]),
             entrance=cast(str | None, order_record["delivery_entrance"]),
             floor=cast(str | None, order_record["delivery_floor"]),
+            apartment=cast(str | None, order_record["delivery_apartment"]),
+            formatted_address=cast(str | None, order_record["delivery_formatted_address"]),
+            location=(
+                AddressLocation(
+                    latitude=float(latitude_value),
+                    longitude=float(longitude_value),
+                )
+                if latitude_value is not None and longitude_value is not None
+                else None
+            ),
+            location_source=AddressLocationSource(
+                cast(str, order_record["delivery_location_source"])
+            ),
         ),
         delivery_notes=cast(str | None, order_record["delivery_notes"]),
         items=[order_item_from_record(record) for record in item_records],
