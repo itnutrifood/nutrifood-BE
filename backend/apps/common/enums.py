@@ -7,6 +7,11 @@ class LanguageCode(StrEnum):
     RU_RU = "RU-RU"
 
 
+class IngredientPreference(StrEnum):
+    WHITELISTED = "whitelisted"
+    BLACKLISTED = "blacklisted"
+
+
 class CategoryStatus(StrEnum):
     ACTIVE = "active"
     INACTIVE = "inactive"

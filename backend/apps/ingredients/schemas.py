@@ -68,3 +68,8 @@ class IngredientRead(BaseModel):
 
 class IngredientListResponse(Page[IngredientRead]):
     pass
+
+
+class PublicIngredientRead(BaseModel):
+    id: UUID
+    name: str

@@ -7,6 +7,7 @@ from uuid import UUID
 import asyncpg
 
 from backend.apps.common.db import json_object, rows_affected
+from backend.apps.common.enums import LanguageCode
 from backend.apps.common.pagination import page_count, page_offset
 from backend.apps.ingredients.exceptions import (
     DuplicateIngredientNameError,
@@ -103,6 +104,24 @@ async def list_ingredients(
         limit=limit,
         total_pages=page_count(total, limit),
     )
+
+
+async def list_all_ingredients(
+    pool: asyncpg.Pool,
+    language: LanguageCode,
+) -> list[IngredientRead]:
+    rows = cast(
+        Sequence[Mapping[str, object]],
+        await pool.fetch(
+            f"""
+            SELECT {INGREDIENT_COLUMNS}
+            FROM ingredients
+            ORDER BY lower(name ->> $1), id
+            """,
+            language.value,
+        ),
+    )
+    return [ingredient_from_record(row) for row in rows]
 
 
 async def update_ingredient(

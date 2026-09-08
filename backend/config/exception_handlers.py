@@ -62,6 +62,9 @@ from backend.apps.users.addresses.exceptions import (
     AddressNotFoundError,
     InvalidAddressLocationError,
 )
+from backend.apps.users.ingredient_preferences.exceptions import (
+    PreferenceIngredientNotFoundError,
+)
 
 DOMAIN_EXCEPTION_TYPES: tuple[type[Exception], ...] = (
     AuthenticationError,
@@ -95,6 +98,7 @@ DOMAIN_EXCEPTION_TYPES: tuple[type[Exception], ...] = (
     EmptyCartError,
     IdempotencyConflictError,
     FavoriteProductNotFoundError,
+    PreferenceIngredientNotFoundError,
     FcmRegistrationNotFoundError,
     AddressNotFoundError,
     AddressGeocodingNotConfiguredError,
@@ -203,6 +207,17 @@ async def domain_exception_handler(_request: Request, exc: Exception) -> JSONRes
                 "detail": {
                     "message": "One or more products were not found",
                     "product_ids": [str(product_id) for product_id in product_ids],
+                }
+            },
+        )
+    if isinstance(exc, PreferenceIngredientNotFoundError):
+        ingredient_ids = cast(Sequence[object], exc.ingredient_ids)
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content={
+                "detail": {
+                    "message": "One or more ingredients were not found",
+                    "ingredient_ids": [str(ingredient_id) for ingredient_id in ingredient_ids],
                 }
             },
         )
