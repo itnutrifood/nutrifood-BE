@@ -52,8 +52,11 @@ from backend.apps.products.exceptions import (
     ProductNotFoundError,
 )
 from backend.apps.subscriptions.exceptions import (
+    ActiveSubscriptionConflictError,
     DuplicateSubscriptionPlanSlugError,
+    SubscriptionPlanDeleteConflictError,
     SubscriptionPlanNotFoundError,
+    UserSubscriptionNotFoundError,
 )
 from backend.apps.testimonials.exceptions import TestimonialNotFoundError
 from backend.apps.users.addresses.exceptions import (
@@ -91,6 +94,9 @@ DOMAIN_EXCEPTION_TYPES: tuple[type[Exception], ...] = (
     DuplicateProductSlugError,
     SubscriptionPlanNotFoundError,
     DuplicateSubscriptionPlanSlugError,
+    SubscriptionPlanDeleteConflictError,
+    UserSubscriptionNotFoundError,
+    ActiveSubscriptionConflictError,
     TestimonialNotFoundError,
     ContactMessageNotFoundError,
     CartProductNotFoundError,
@@ -195,6 +201,20 @@ async def domain_exception_handler(_request: Request, exc: Exception) -> JSONRes
         return _not_found("Subscription plan not found")
     if isinstance(exc, DuplicateSubscriptionPlanSlugError):
         return _conflict("Subscription plan slug already exists")
+    if isinstance(exc, SubscriptionPlanDeleteConflictError):
+        return _conflict("Subscription plan has subscription history and cannot be deleted")
+    if isinstance(exc, UserSubscriptionNotFoundError):
+        return _not_found("Active subscription not found")
+    if isinstance(exc, ActiveSubscriptionConflictError):
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={
+                "detail": {
+                    "message": "User already has an active subscription",
+                    "subscription_plan_id": str(exc.subscription_plan_id),
+                }
+            },
+        )
     if isinstance(exc, TestimonialNotFoundError):
         return _not_found("Testimonial not found")
     if isinstance(exc, ContactMessageNotFoundError):

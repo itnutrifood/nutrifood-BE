@@ -18,7 +18,12 @@ from backend.apps.common.pagination import (
 )
 from backend.apps.subscriptions import repository
 from backend.apps.subscriptions.exceptions import SubscriptionPlanNotFoundError
-from backend.apps.subscriptions.schemas import PublicSubscriptionPlanRead, SubscriptionPlanRead
+from backend.apps.subscriptions.schemas import (
+    PublicSubscriptionPlanRead,
+    SubscriptionPlanRead,
+    UserSubscriptionRead,
+    UserSubscriptionRecord,
+)
 
 PublicSubscriptionPlanNotFoundError = SubscriptionPlanNotFoundError
 
@@ -123,6 +128,58 @@ async def get_public_subscription_plan(
         subscription_plan_id,
     )
     return _public_subscription_plan(subscription_plan, language)
+
+
+async def get_current_user_subscription(
+    pool: asyncpg.Pool,
+    user_id: UUID,
+    language: LanguageCode,
+) -> UserSubscriptionRead:
+    subscription = await repository.get_active_user_subscription(pool, user_id)
+    return await _user_subscription(pool, subscription, language)
+
+
+async def activate_test_user_subscription(
+    pool: asyncpg.Pool,
+    user_id: UUID,
+    subscription_plan_id: UUID,
+    language: LanguageCode,
+) -> tuple[UserSubscriptionRead, bool]:
+    subscription, created = await repository.create_test_user_subscription(
+        pool,
+        user_id,
+        subscription_plan_id,
+    )
+    return await _user_subscription(pool, subscription, language), created
+
+
+async def cancel_user_subscription(
+    pool: asyncpg.Pool,
+    user_id: UUID,
+    subscription_plan_id: UUID,
+) -> None:
+    await repository.cancel_user_subscription(pool, user_id, subscription_plan_id)
+
+
+async def _user_subscription(
+    pool: asyncpg.Pool,
+    subscription: UserSubscriptionRecord,
+    language: LanguageCode,
+) -> UserSubscriptionRead:
+    subscription_plan = await repository.get_subscription_plan(
+        pool,
+        subscription.subscription_plan_id,
+    )
+    return UserSubscriptionRead(
+        id=subscription.id,
+        status=subscription.status,
+        activation_source=subscription.activation_source,
+        started_at=subscription.started_at,
+        cancelled_at=subscription.cancelled_at,
+        plan=_public_subscription_plan(subscription_plan, language),
+        created_at=subscription.created_at,
+        updated_at=subscription.updated_at,
+    )
 
 
 def _public_subscription_plan(

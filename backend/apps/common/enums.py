@@ -43,6 +43,16 @@ class SubscriptionPlanStatus(StrEnum):
     ARCHIVED = "archived"
 
 
+class UserSubscriptionStatus(StrEnum):
+    ACTIVE = "active"
+    CANCELLED = "cancelled"
+
+
+class SubscriptionActivationSource(StrEnum):
+    TEST_BYPASS = "test_bypass"
+    PAYMENT = "payment"
+
+
 class TestimonialStatus(StrEnum):
     ACTIVE = "active"
     INACTIVE = "inactive"

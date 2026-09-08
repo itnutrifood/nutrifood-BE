@@ -12,7 +12,12 @@ from pydantic import (
     model_validator,
 )
 
-from backend.apps.common.enums import LanguageCode, SubscriptionPlanStatus
+from backend.apps.common.enums import (
+    LanguageCode,
+    SubscriptionActivationSource,
+    SubscriptionPlanStatus,
+    UserSubscriptionStatus,
+)
 from backend.apps.common.pagination import Page
 
 SubscriptionPlanSlug = Annotated[
@@ -190,5 +195,28 @@ class PublicSubscriptionPlanRead(BaseModel):
     status: SubscriptionPlanStatus
     sort_order: int
     additional_info: list[str]
+    created_at: datetime
+    updated_at: datetime
+
+
+class UserSubscriptionRecord(BaseModel):
+    id: UUID
+    user_id: UUID
+    subscription_plan_id: UUID
+    status: UserSubscriptionStatus
+    activation_source: SubscriptionActivationSource
+    started_at: datetime
+    cancelled_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class UserSubscriptionRead(BaseModel):
+    id: UUID
+    status: UserSubscriptionStatus
+    activation_source: SubscriptionActivationSource
+    started_at: datetime
+    cancelled_at: datetime | None
+    plan: PublicSubscriptionPlanRead
     created_at: datetime
     updated_at: datetime

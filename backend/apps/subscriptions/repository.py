@@ -8,11 +8,18 @@ from uuid import UUID
 import asyncpg
 
 from backend.apps.common.db import json_object, rows_affected
-from backend.apps.common.enums import SubscriptionPlanStatus
+from backend.apps.common.enums import (
+    SubscriptionActivationSource,
+    SubscriptionPlanStatus,
+    UserSubscriptionStatus,
+)
 from backend.apps.common.pagination import page_count, page_offset
 from backend.apps.subscriptions.exceptions import (
+    ActiveSubscriptionConflictError,
     DuplicateSubscriptionPlanSlugError,
+    SubscriptionPlanDeleteConflictError,
     SubscriptionPlanNotFoundError,
+    UserSubscriptionNotFoundError,
 )
 from backend.apps.subscriptions.schemas import (
     LocalizedInfoItems,
@@ -22,6 +29,7 @@ from backend.apps.subscriptions.schemas import (
     SubscriptionPlanListResponse,
     SubscriptionPlanRead,
     SubscriptionPlanUpdate,
+    UserSubscriptionRecord,
 )
 
 SUBSCRIPTION_PLAN_COLUMNS = """
@@ -36,6 +44,18 @@ SUBSCRIPTION_PLAN_COLUMNS = """
     status::text AS status,
     sort_order,
     additional_info,
+    created_at,
+    updated_at
+"""
+
+USER_SUBSCRIPTION_COLUMNS = """
+    id,
+    user_id,
+    subscription_plan_id,
+    status::text AS status,
+    activation_source::text AS activation_source,
+    started_at,
+    cancelled_at,
     created_at,
     updated_at
 """
@@ -56,6 +76,20 @@ def subscription_plan_from_record(record: Mapping[str, object]) -> SubscriptionP
         status=SubscriptionPlanStatus(cast(str, record["status"])),
         sort_order=cast(int, record["sort_order"]),
         additional_info=LocalizedInfoItems.model_validate(json_object(record["additional_info"])),
+        created_at=cast(datetime, record["created_at"]),
+        updated_at=cast(datetime, record["updated_at"]),
+    )
+
+
+def user_subscription_from_record(record: Mapping[str, object]) -> UserSubscriptionRecord:
+    return UserSubscriptionRecord(
+        id=cast(UUID, record["id"]),
+        user_id=cast(UUID, record["user_id"]),
+        subscription_plan_id=cast(UUID, record["subscription_plan_id"]),
+        status=UserSubscriptionStatus(cast(str, record["status"])),
+        activation_source=SubscriptionActivationSource(cast(str, record["activation_source"])),
+        started_at=cast(datetime, record["started_at"]),
+        cancelled_at=cast(datetime | None, record["cancelled_at"]),
         created_at=cast(datetime, record["created_at"]),
         updated_at=cast(datetime, record["updated_at"]),
     )
@@ -263,10 +297,17 @@ async def update_subscription_plan(
 
 
 async def delete_subscription_plan(pool: asyncpg.Pool, subscription_plan_id: UUID) -> None:
-    command_status = cast(
-        str,
-        await pool.execute("DELETE FROM subscription_plans WHERE id = $1", subscription_plan_id),
-    )
+    try:
+        command_status = cast(
+            str,
+            await pool.execute(
+                "DELETE FROM subscription_plans WHERE id = $1",
+                subscription_plan_id,
+            ),
+        )
+    except asyncpg.ForeignKeyViolationError as exc:
+        raise SubscriptionPlanDeleteConflictError from exc
+
     if rows_affected(command_status) == 0:
         raise SubscriptionPlanNotFoundError
 
@@ -331,3 +372,119 @@ async def get_active_subscription_plan(
         raise SubscriptionPlanNotFoundError
 
     return subscription_plan_from_record(row)
+
+
+async def get_active_user_subscription(
+    pool: asyncpg.Pool,
+    user_id: UUID,
+) -> UserSubscriptionRecord:
+    row = cast(
+        Mapping[str, object] | None,
+        await pool.fetchrow(
+            f"""
+            SELECT {USER_SUBSCRIPTION_COLUMNS}
+            FROM user_subscriptions
+            WHERE user_id = $1
+                AND status = $2::user_subscription_status
+            """,
+            user_id,
+            UserSubscriptionStatus.ACTIVE.value,
+        ),
+    )
+    if row is None:
+        raise UserSubscriptionNotFoundError
+
+    return user_subscription_from_record(row)
+
+
+async def create_test_user_subscription(
+    pool: asyncpg.Pool,
+    user_id: UUID,
+    subscription_plan_id: UUID,
+) -> tuple[UserSubscriptionRecord, bool]:
+    async with pool.acquire() as connection, connection.transaction():
+        await connection.fetchval(
+            "SELECT id FROM users WHERE id = $1 FOR UPDATE",
+            user_id,
+        )
+
+        current_row = cast(
+            Mapping[str, object] | None,
+            await connection.fetchrow(
+                f"""
+                SELECT {USER_SUBSCRIPTION_COLUMNS}
+                FROM user_subscriptions
+                WHERE user_id = $1
+                    AND status = $2::user_subscription_status
+                """,
+                user_id,
+                UserSubscriptionStatus.ACTIVE.value,
+            ),
+        )
+        if current_row is not None:
+            current_subscription = user_subscription_from_record(current_row)
+            if current_subscription.subscription_plan_id != subscription_plan_id:
+                raise ActiveSubscriptionConflictError(current_subscription.subscription_plan_id)
+            return current_subscription, False
+
+        plan_id = await connection.fetchval(
+            """
+            SELECT id
+            FROM subscription_plans
+            WHERE id = $1
+                AND status = $2::subscription_plan_status
+            FOR SHARE
+            """,
+            subscription_plan_id,
+            SubscriptionPlanStatus.ACTIVE.value,
+        )
+        if plan_id is None:
+            raise SubscriptionPlanNotFoundError
+
+        row = cast(
+            Mapping[str, object] | None,
+            await connection.fetchrow(
+                f"""
+                INSERT INTO user_subscriptions (
+                    user_id,
+                    subscription_plan_id,
+                    activation_source
+                )
+                VALUES ($1, $2, $3::subscription_activation_source)
+                RETURNING {USER_SUBSCRIPTION_COLUMNS}
+                """,
+                user_id,
+                subscription_plan_id,
+                SubscriptionActivationSource.TEST_BYPASS.value,
+            ),
+        )
+        if row is None:
+            raise RuntimeError("User subscription insert did not return a row")
+
+        return user_subscription_from_record(row), True
+
+
+async def cancel_user_subscription(
+    pool: asyncpg.Pool,
+    user_id: UUID,
+    subscription_plan_id: UUID,
+) -> None:
+    async with pool.acquire() as connection, connection.transaction():
+        await connection.fetchval(
+            "SELECT id FROM users WHERE id = $1 FOR UPDATE",
+            user_id,
+        )
+        await connection.execute(
+            """
+            UPDATE user_subscriptions
+            SET status = $3::user_subscription_status,
+                cancelled_at = now()
+            WHERE user_id = $1
+                AND subscription_plan_id = $2
+                AND status = $4::user_subscription_status
+            """,
+            user_id,
+            subscription_plan_id,
+            UserSubscriptionStatus.CANCELLED.value,
+            UserSubscriptionStatus.ACTIVE.value,
+        )

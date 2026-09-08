@@ -10,6 +10,7 @@ from backend.apps.subscriptions.admin_service import (
 )
 from backend.apps.subscriptions.exceptions import (
     DuplicateSubscriptionPlanSlugError,
+    SubscriptionPlanDeleteConflictError,
     SubscriptionPlanNotFoundError,
 )
 from backend.apps.subscriptions.repository import SUBSCRIPTION_PLAN_COLUMNS
@@ -45,6 +46,7 @@ __all__ = [
     "SortOrder",
     "SubscriptionPlanInfoItem",
     "SubscriptionPlanCreate",
+    "SubscriptionPlanDeleteConflictError",
     "SubscriptionPlanListResponse",
     "SubscriptionPlanNotFoundError",
     "SubscriptionPlanPrice",

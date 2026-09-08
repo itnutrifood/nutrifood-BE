@@ -4,6 +4,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
+import asyncpg
 from backend.apps.admin import auth as admin_auth_module
 from backend.config.database import get_pool
 from fastapi.testclient import TestClient
@@ -137,14 +138,17 @@ class UpdateSubscriptionPlanPool:
 
 
 class DeleteSubscriptionPlanPool:
-    def __init__(self) -> None:
+    def __init__(self, *, has_subscriptions: bool = False) -> None:
         self.deleted_subscription_plan_id: UUID | None = None
+        self.has_subscriptions = has_subscriptions
 
     async def execute(self, query: str, *args: object) -> str:
         if "DELETE FROM subscription_plans" not in query:
             raise AssertionError(f"Unexpected query: {query}")
 
         self.deleted_subscription_plan_id = args[0] if isinstance(args[0], UUID) else None
+        if self.has_subscriptions:
+            raise asyncpg.ForeignKeyViolationError
         return "DELETE 1"
 
 
@@ -231,3 +235,19 @@ def test_admin_delete_subscription_plan_returns_no_content(monkeypatch: Any) -> 
     assert response.status_code == 204
     assert response.content == b""
     assert pool.deleted_subscription_plan_id == SUBSCRIPTION_PLAN_ID
+
+
+def test_admin_cannot_delete_plan_with_subscription_history(monkeypatch: Any) -> None:
+    pool = DeleteSubscriptionPlanPool(has_subscriptions=True)
+    app = configure_test_app(monkeypatch, pool)
+
+    try:
+        with TestClient(app) as client:
+            response = client.delete(f"/api/v1/admin/subscriptions/{SUBSCRIPTION_PLAN_ID}")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": "Subscription plan has subscription history and cannot be deleted"
+    }
