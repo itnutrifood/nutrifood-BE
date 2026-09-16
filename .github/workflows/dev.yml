@@ -97,6 +97,27 @@ jobs:
           set +a
           /usr/local/bin/goose -dir migrations up
 
-          supervisorctl restart nutrifood
-          supervisorctl status nutrifood
+          supervisor_template="$project_path/deploy/supervisor/nutrifood-celery-worker.conf"
+          supervisor_config=/etc/supervisor/conf.d/nutrifood-celery-worker.conf
+          app_user="$(sed -n 's/^user=//p' /etc/supervisor/conf.d/nutrifood.conf | head -n 1)"
+          if [ -z "$app_user" ]; then
+            printf 'Could not determine the application user from Supervisor config\n' >&2
+            exit 1
+          fi
+
+          rendered_config="$(< "$supervisor_template")"
+          rendered_config="${rendered_config//__PROJECT_PATH__/$project_path}"
+          rendered_config="${rendered_config//__VENV_PATH__/$venv_path}"
+          rendered_config="${rendered_config//__APP_USER__/$app_user}"
+          config_tmp="$(mktemp)"
+          trap 'rm -f "$config_tmp"' EXIT
+          printf '%s\n' "$rendered_config" > "$config_tmp"
+          install -m 0644 "$config_tmp" "$supervisor_config"
+          rm -f "$config_tmp"
+          trap - EXIT
+
+          supervisorctl reread
+          supervisorctl update
+          supervisorctl restart nutrifood nutrifood-celery-worker
+          supervisorctl status nutrifood nutrifood-celery-worker
           REMOTE_SCRIPT

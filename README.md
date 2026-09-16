@@ -160,6 +160,12 @@ make celery-logs
 make celery-status
 ```
 
+Docker Compose starts the worker as its own service. Native dev and production
+deployments install `deploy/supervisor/nutrifood-celery-worker.conf` through the
+deployment workflow and let Supervisor keep the worker running. The GitHub Actions
+runner does not run the worker itself; it only updates and restarts the process on
+the target server.
+
 ## Application logs
 
 The API, Celery worker, and Celery Beat write to both the container console and
