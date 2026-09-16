@@ -1,5 +1,6 @@
 import json
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import cast
 from uuid import UUID
@@ -18,6 +19,12 @@ from backend.apps.orders.repository import (
     order_from_records,
 )
 from backend.apps.orders.schemas import OrderRead, PlaceOrderRequest
+
+
+@dataclass(frozen=True)
+class PlaceOrderResult:
+    order: OrderRead
+    created: bool
 
 
 async def _fetch_order_items(
@@ -45,7 +52,7 @@ async def place_order(
     idempotency_key: str,
     request_fingerprint: str,
     currency: str,
-) -> OrderRead:
+) -> PlaceOrderResult:
     async with pool.acquire() as connection, connection.transaction():
         # Serialize checkout attempts for one user so two different requests cannot consume
         # the same cart, and so an idempotent retry observes the committed first order.
@@ -70,9 +77,12 @@ async def place_order(
             if existing_order["request_fingerprint"] != request_fingerprint:
                 raise IdempotencyConflictError
             order_id = cast(UUID, existing_order["id"])
-            return order_from_records(
-                existing_order,
-                await _fetch_order_items(connection, order_id),
+            return PlaceOrderResult(
+                order=order_from_records(
+                    existing_order,
+                    await _fetch_order_items(connection, order_id),
+                ),
+                created=False,
             )
 
         address = cast(
@@ -266,4 +276,7 @@ async def place_order(
             user_id,
             product_ids,
         )
-        return order_from_records(order_row, item_rows)
+        return PlaceOrderResult(
+            order=order_from_records(order_row, item_rows),
+            created=True,
+        )

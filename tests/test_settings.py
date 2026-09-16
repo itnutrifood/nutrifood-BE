@@ -54,12 +54,10 @@ def test_celery_settings_are_loaded_from_environment(
 
 def test_sendgrid_settings_are_loaded_from_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SENDGRID_API_KEY", "sendgrid-api-key")
-    monkeypatch.setenv("SENDGRID_FROM_EMAIL", "sender@example.com")
 
     settings = Settings(_env_file=None)
 
     assert settings.sendgrid_api_key == "sendgrid-api-key"
-    assert settings.sendgrid_from_email == "sender@example.com"
 
 
 def test_catalog_currency_is_loaded_and_validated(monkeypatch: pytest.MonkeyPatch) -> None:

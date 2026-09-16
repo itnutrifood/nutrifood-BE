@@ -2,6 +2,7 @@ from typing import Any
 
 import pytest
 from backend.config.email import (
+    EmailFromAddress,
     EmailService,
     EmailServiceNotConfiguredError,
     _create_email_service,
@@ -37,7 +38,7 @@ async def test_send_email_builds_and_sends_message(monkeypatch: pytest.MonkeyPat
     service = EmailService(" secret-key ")
 
     status_code = await service.send_email(
-        from_email="orders@nutrifood.example",
+        from_email=EmailFromAddress.INFO,
         to_emails=["customer@example.com", "copy@example.com"],
         subject="Order confirmed",
         plain_text_content="Your order is confirmed.",
@@ -47,7 +48,7 @@ async def test_send_email_builds_and_sends_message(monkeypatch: pytest.MonkeyPat
     assert status_code == 202
     assert clients[0].api_key == "secret-key"
     assert clients[0].message.get() == {
-        "from": {"email": "orders@nutrifood.example"},
+        "from": {"email": "info@nutrifood.am"},
         "subject": "Order confirmed",
         "personalizations": [
             {
@@ -75,7 +76,7 @@ async def test_send_email_requires_content() -> None:
 
     with pytest.raises(ValueError, match="content variant"):
         await service.send_email(
-            from_email="orders@nutrifood.example",
+            from_email=EmailFromAddress.INFO,
             to_emails="customer@example.com",
             subject="Order confirmed",
         )

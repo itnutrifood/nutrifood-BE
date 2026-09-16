@@ -6,6 +6,7 @@ from uuid import UUID
 
 from backend.apps.accounts.auth import UserIdentity, get_current_user
 from backend.apps.admin import auth as admin_auth_module
+from backend.apps.checkout import service as checkout_service
 from backend.config.database import get_pool
 from fastapi.testclient import TestClient
 
@@ -270,11 +271,21 @@ def configure_test_app(
     *,
     authenticated: bool = True,
     admin_authenticated: bool = False,
+    enqueued_email_order_ids: list[UUID] | None = None,
 ) -> Any:
     from backend.config import database
     from backend.config.asgi import app
 
     monkeypatch.setattr(database, "create_pool", create_dummy_pool)
+    monkeypatch.setattr(
+        checkout_service.send_order_preparing_email,
+        "delay",
+        lambda order_id: (
+            enqueued_email_order_ids.append(UUID(order_id))
+            if enqueued_email_order_ids is not None
+            else None
+        ),
+    )
     app.dependency_overrides[get_pool] = lambda: pool
     if authenticated:
         app.dependency_overrides[get_current_user] = current_user
@@ -305,7 +316,12 @@ def test_place_order_snapshots_server_totals_clears_cart_and_replays_safely(
     monkeypatch: Any,
 ) -> None:
     pool = CheckoutPool()
-    app = configure_test_app(monkeypatch, pool)
+    enqueued_email_order_ids: list[UUID] = []
+    app = configure_test_app(
+        monkeypatch,
+        pool,
+        enqueued_email_order_ids=enqueued_email_order_ids,
+    )
 
     try:
         with TestClient(app) as client:
@@ -342,6 +358,7 @@ def test_place_order_snapshots_server_totals_clears_cart_and_replays_safely(
     assert pool.cart_read_count == 1
     assert pool.deleted_product_ids == [PRODUCT_ID]
     assert pool.advisory_lock_count == 2
+    assert enqueued_email_order_ids == [ORDER_ID]
 
 
 def test_place_order_rejects_requested_delivery_at_without_timezone(monkeypatch: Any) -> None:

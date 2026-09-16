@@ -63,7 +63,6 @@ class Settings(BaseSettings):
     fcm_registration_stale_days: int = Field(default=30, ge=1)
 
     sendgrid_api_key: str = ""
-    sendgrid_from_email: str = ""
 
     r2_endpoint_url: str = ""
     r2_access_key_id: str = ""

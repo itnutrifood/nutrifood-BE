@@ -2,6 +2,7 @@ from typing import Any
 
 import pytest
 from backend.apps.notifications import tasks
+from backend.apps.orders import tasks as order_tasks
 from backend.apps.statistics import tasks as statistics_tasks
 from backend.apps.statistics.schemas import PublicStatistics
 from backend.config.celery_app import app
@@ -9,6 +10,7 @@ from backend.config.settings import Settings
 
 TASK_NAME = "backend.apps.notifications.tasks.prune_stale_fcm_registrations"
 STATISTICS_TASK_NAME = "backend.apps.statistics.tasks.refresh_statistics_cache"
+ORDER_EMAIL_TASK_NAME = "backend.apps.orders.tasks.send_order_preparing_email"
 
 
 class TaskPool:
@@ -58,6 +60,15 @@ def test_daily_statistics_refresh_is_registered_on_the_periodic_queue() -> None:
     assert schedule["options"] == {"queue": "periodic", "expires": 21_600}
 
     task = app.tasks[STATISTICS_TASK_NAME]
+    assert task.acks_late is True
+    assert task.ignore_result is True
+    assert task.max_retries == 3
+
+
+def test_order_email_task_retries_transient_failures() -> None:
+    task = app.tasks[ORDER_EMAIL_TASK_NAME]
+
+    assert task.name == order_tasks.send_order_preparing_email.name
     assert task.acks_late is True
     assert task.ignore_result is True
     assert task.max_retries == 3

@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from enum import StrEnum
 from functools import lru_cache
 from typing import Annotated, Any
 
@@ -8,6 +9,10 @@ from sendgrid.helpers.mail import Mail
 from starlette.concurrency import run_in_threadpool
 
 from backend.config.settings import Settings, get_settings
+
+
+class EmailFromAddress(StrEnum):
+    INFO = "info@nutrifood.am"
 
 
 class EmailServiceNotConfiguredError(RuntimeError):
@@ -26,7 +31,7 @@ class EmailService:
     async def send_email(
         self,
         *,
-        from_email: str,
+        from_email: EmailFromAddress,
         to_emails: str | Sequence[str],
         subject: str,
         plain_text_content: str | None = None,
@@ -45,7 +50,7 @@ class EmailService:
                 raise ValueError("At least one recipient is required")
 
         message = Mail(
-            from_email=from_email,
+            from_email=from_email.value,
             to_emails=recipients,
             subject=subject,
             plain_text_content=plain_text_content,

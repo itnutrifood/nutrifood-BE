@@ -17,12 +17,11 @@ async def test_script_sends_to_fixed_test_recipient(
         return 202
 
     monkeypatch.setenv("SENDGRID_API_KEY", "sendgrid-api-key")
-    monkeypatch.setenv("SENDGRID_FROM_EMAIL", "verified-sender@example.com")
     monkeypatch.setattr(EmailService, "send_email", fake_send_email)
 
     await test_email_script.send_test_email()
 
-    assert sent["from_email"] == "verified-sender@example.com"
+    assert sent["from_email"] == "info@nutrifood.am"
     assert sent["to_emails"] == "aghabekyan.pargev@gmail.com"
     assert sent["subject"] == "NutriFood SendGrid test"
     assert "HTTP 202" in capsys.readouterr().out

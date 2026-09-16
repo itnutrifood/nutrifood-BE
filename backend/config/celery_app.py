@@ -25,6 +25,7 @@ app = Celery(
     backend=settings.celery_result_backend,
     include=(
         "backend.apps.notifications.tasks",
+        "backend.apps.orders.tasks",
         "backend.apps.statistics.tasks",
     ),
 )
