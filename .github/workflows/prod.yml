@@ -27,6 +27,7 @@ jobs:
       DEPLOY_PROJECT_PATH: ${{ secrets.PROJECT_PATH }}
       DEPLOY_REPO_SSH_KEY_PATH: ${{ secrets.REPO_SSH_KEY_PATH }}
       DEPLOY_VENV_PATH: ${{ secrets.VENV_PATH }}
+      DEPLOY_APP_USER: ${{ vars.APP_USER || 'nutrifood' }}
 
     steps:
       - name: Configure SSH
@@ -55,12 +56,14 @@ jobs:
             bash -s -- \
               "$DEPLOY_PROJECT_PATH" \
               "$DEPLOY_REPO_SSH_KEY_PATH" \
-              "${DEPLOY_VENV_PATH:-__AUTO__}" <<'REMOTE_SCRIPT'
+              "${DEPLOY_VENV_PATH:-__AUTO__}" \
+              "$DEPLOY_APP_USER" <<'REMOTE_SCRIPT'
           set -Eeuo pipefail
 
           project_path=$1
           repo_ssh_key_path=$2
           venv_path=$3
+          app_user=$4
 
           if [ "$venv_path" = "__AUTO__" ]; then
             venv_path="$(dirname "$project_path")/venv"
@@ -97,27 +100,8 @@ jobs:
           set +a
           /usr/local/bin/goose -dir migrations up
 
-          supervisor_template="$project_path/deploy/supervisor/nutrifood-celery-worker.conf"
-          supervisor_config=/etc/supervisor/conf.d/nutrifood-celery-worker.conf
-          app_user="$(sed -n 's/^user=//p' /etc/supervisor/conf.d/nutrifood.conf | head -n 1)"
-          if [ -z "$app_user" ]; then
-            printf 'Could not determine the application user from Supervisor config\n' >&2
-            exit 1
-          fi
-
-          rendered_config="$(< "$supervisor_template")"
-          rendered_config="${rendered_config//__PROJECT_PATH__/$project_path}"
-          rendered_config="${rendered_config//__VENV_PATH__/$venv_path}"
-          rendered_config="${rendered_config//__APP_USER__/$app_user}"
-          config_tmp="$(mktemp)"
-          trap 'rm -f "$config_tmp"' EXIT
-          printf '%s\n' "$rendered_config" > "$config_tmp"
-          install -m 0644 "$config_tmp" "$supervisor_config"
-          rm -f "$config_tmp"
-          trap - EXIT
-
-          supervisorctl reread
-          supervisorctl update
-          supervisorctl restart nutrifood nutrifood-celery-worker
-          supervisorctl status nutrifood nutrifood-celery-worker
+          bash "$project_path/deploy/supervisor/install.sh" \
+            "$project_path" \
+            "$venv_path" \
+            "$app_user"
           REMOTE_SCRIPT
