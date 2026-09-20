@@ -238,6 +238,42 @@ async def get_admin_order(pool: asyncpg.Pool, order_id: UUID) -> OrderRead:
     return await _get_order(pool, order_id, None)
 
 
+async def update_order_status(
+    pool: asyncpg.Pool,
+    order_id: UUID,
+    status: OrderStatus,
+) -> OrderRead:
+    order_row = cast(
+        Mapping[str, object] | None,
+        await pool.fetchrow(
+            f"""
+            UPDATE orders AS o
+            SET status = $1
+            WHERE o.id = $2
+            RETURNING {ORDER_COLUMNS}
+            """,
+            status.value,
+            order_id,
+        ),
+    )
+    if order_row is None:
+        raise OrderNotFoundError
+
+    item_rows = cast(
+        Sequence[Mapping[str, object]],
+        await pool.fetch(
+            f"""
+            SELECT {ORDER_ITEM_COLUMNS}
+            FROM order_items AS oi
+            WHERE oi.order_id = $1
+            ORDER BY oi.position
+            """,
+            order_id,
+        ),
+    )
+    return order_from_records(order_row, item_rows)
+
+
 async def get_order_confirmation_recipient(
     pool: asyncpg.Pool,
     order_id: UUID,

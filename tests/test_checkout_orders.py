@@ -56,6 +56,7 @@ def localized_title() -> dict[str, str]:
 
 def order_record(
     *,
+    status: str = "pending",
     payment_method: str = "cash_on_delivery",
     request_fingerprint: str = "a" * 64,
     requested_delivery_at: datetime | None = REQUESTED_DELIVERY_AT,
@@ -64,7 +65,7 @@ def order_record(
         "id": ORDER_ID,
         "order_number": "NFUX6Q8N6LD",
         "user_id": USER_ID,
-        "status": "pending",
+        "status": status,
         "payment_method": payment_method,
         "payment_status": "unpaid",
         "subtotal": Decimal("25.98"),
@@ -263,6 +264,28 @@ class OrderPool:
             self.list_args = args
             return [order_record(payment_method="pos")]
         raise AssertionError(f"Unexpected query: {query}")
+
+
+class UpdateOrderStatusPool:
+    def __init__(self, *, order_exists: bool = True) -> None:
+        self.order_exists = order_exists
+        self.updated_statuses: list[str] = []
+
+    async def fetchrow(self, query: str, *args: object) -> dict[str, object] | None:
+        assert "UPDATE orders AS o" in query
+        assert "SET status = $1" in query
+        assert args[1] == ORDER_ID
+        if not self.order_exists:
+            return None
+
+        updated_status = str(args[0])
+        self.updated_statuses.append(updated_status)
+        return order_record(status=updated_status)
+
+    async def fetch(self, query: str, *args: object) -> list[dict[str, object]]:
+        assert "FROM order_items AS oi" in query
+        assert args == (ORDER_ID,)
+        return [order_item_record()]
 
 
 def configure_test_app(
@@ -530,3 +553,65 @@ def test_admin_can_see_all_orders_and_filter_them(monkeypatch: Any) -> None:
     assert detail_response.status_code == 200
     assert pool.detail_query is not None and "o.user_id =" not in pool.detail_query
     assert pool.detail_args == (ORDER_ID,)
+
+
+def test_admin_can_switch_order_fulfillment_status(monkeypatch: Any) -> None:
+    pool = UpdateOrderStatusPool()
+    app = configure_test_app(monkeypatch, pool, admin_authenticated=True)
+
+    try:
+        with TestClient(app) as client:
+            responses = [
+                client.patch(
+                    f"/api/v1/admin/orders/{ORDER_ID}/status",
+                    json={"status": order_status},
+                )
+                for order_status in ("preparing", "out_for_delivery", "delivered")
+            ]
+    finally:
+        app.dependency_overrides.clear()
+
+    assert [response.status_code for response in responses] == [200, 200, 200]
+    assert [response.json()["status"] for response in responses] == [
+        "preparing",
+        "out_for_delivery",
+        "delivered",
+    ]
+    assert pool.updated_statuses == ["preparing", "out_for_delivery", "delivered"]
+
+
+def test_admin_order_status_update_rejects_other_statuses(monkeypatch: Any) -> None:
+    pool = UpdateOrderStatusPool()
+    app = configure_test_app(monkeypatch, pool, admin_authenticated=True)
+
+    try:
+        with TestClient(app) as client:
+            response = client.patch(
+                f"/api/v1/admin/orders/{ORDER_ID}/status",
+                json={"status": "pending"},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 422
+    assert pool.updated_statuses == []
+
+
+def test_admin_order_status_update_returns_not_found(monkeypatch: Any) -> None:
+    app = configure_test_app(
+        monkeypatch,
+        UpdateOrderStatusPool(order_exists=False),
+        admin_authenticated=True,
+    )
+
+    try:
+        with TestClient(app) as client:
+            response = client.patch(
+                f"/api/v1/admin/orders/{ORDER_ID}/status",
+                json={"status": "preparing"},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Order not found"}

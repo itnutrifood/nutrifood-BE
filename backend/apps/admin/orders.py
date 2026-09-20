@@ -2,8 +2,17 @@
 
 from backend.apps.orders.admin_routers import router
 from backend.apps.orders.exceptions import OrderNotFoundError
-from backend.apps.orders.schemas import OrderListResponse, OrderRead, OrderSummaryRead
-from backend.apps.orders.service import get_admin_order, list_admin_orders
+from backend.apps.orders.schemas import (
+    OrderListResponse,
+    OrderRead,
+    OrderStatusUpdate,
+    OrderSummaryRead,
+)
+from backend.apps.orders.service import (
+    get_admin_order,
+    list_admin_orders,
+    update_admin_order_status,
+)
 from backend.config.database import DbPool
 
 __all__ = [
@@ -11,8 +20,10 @@ __all__ = [
     "OrderListResponse",
     "OrderNotFoundError",
     "OrderRead",
+    "OrderStatusUpdate",
     "OrderSummaryRead",
     "get_admin_order",
     "list_admin_orders",
     "router",
+    "update_admin_order_status",
 ]

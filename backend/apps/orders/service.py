@@ -47,3 +47,11 @@ async def list_admin_orders(
 
 async def get_admin_order(pool: asyncpg.Pool, order_id: UUID) -> OrderRead:
     return await repository.get_admin_order(pool, order_id)
+
+
+async def update_admin_order_status(
+    pool: asyncpg.Pool,
+    order_id: UUID,
+    status: OrderStatus,
+) -> OrderRead:
+    return await repository.update_order_status(pool, order_id, status)
