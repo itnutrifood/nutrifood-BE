@@ -238,6 +238,27 @@ async def get_admin_order(pool: asyncpg.Pool, order_id: UUID) -> OrderRead:
     return await _get_order(pool, order_id, None)
 
 
+async def get_order_item_image_urls(pool: asyncpg.Pool, order_id: UUID) -> dict[UUID, str]:
+    """Return the first current product image for each order item, when available."""
+    rows = cast(
+        Sequence[Mapping[str, object]],
+        await pool.fetch(
+            """
+            SELECT oi.id AS item_id, p.images -> 0 ->> 'url' AS image_url
+            FROM order_items AS oi
+            INNER JOIN products AS p ON p.id = oi.product_id
+            WHERE oi.order_id = $1
+            """,
+            order_id,
+        ),
+    )
+    return {
+        cast(UUID, row["item_id"]): cast(str, row["image_url"])
+        for row in rows
+        if row["image_url"] is not None
+    }
+
+
 async def update_order_status(
     pool: asyncpg.Pool,
     order_id: UUID,

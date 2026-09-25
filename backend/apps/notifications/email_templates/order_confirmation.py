@@ -1,6 +1,7 @@
 """Render order confirmations from a shared layout and language-specific copy."""
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -9,6 +10,8 @@ from html import escape
 from pathlib import Path
 from string import Template
 from typing import cast
+from urllib.parse import urlsplit
+from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from backend.apps.common.enums import LanguageCode, PaymentMethod, PaymentStatus
@@ -49,6 +52,24 @@ def _text(copy: dict[str, object], key: str) -> str:
 
 def _money(amount: Decimal, currency: str) -> str:
     return f"{amount:,.2f} {currency}"
+
+
+def _email_image_url(url: str | None) -> str | None:
+    if not url:
+        return None
+    url = url.strip()
+    try:
+        parsed = urlsplit(url)
+        if (
+            parsed.scheme.lower() == "https"
+            and parsed.hostname
+            and not parsed.username
+            and not parsed.password
+        ):
+            return url
+    except ValueError:
+        pass
+    return None
 
 
 def _date(value: datetime, copy: dict[str, object]) -> str:
@@ -103,6 +124,7 @@ def _payment(order: OrderRead, copy: dict[str, object]) -> str:
 def render_order_confirmation(
     order: OrderRead,
     language: LanguageCode = LanguageCode.EN_US,
+    item_images: Mapping[UUID, str] | None = None,
 ) -> OrderEmail:
     """Build localized HTML and plain-text receipts from the saved order snapshot."""
     copy = _translation(language)
@@ -122,13 +144,25 @@ def render_order_confirmation(
     delivery_at = _date(order.requested_delivery_at, copy) if order.requested_delivery_at else None
     item_rows: list[str] = []
     item_lines: list[str] = []
+    image_urls = item_images or {}
     for item in order.items:
         title = item.product_title.to_db()[language.value]
         unit_price = _money(item.unit_price, order.currency)
         line_total = _money(item.line_total, order.currency)
         item_lines.append(f"- {title} — {item.quantity} × {unit_price} = {line_total}")
+        image_url = _email_image_url(image_urls.get(item.id))
+        image_cell = (
+            '<td width="76" style="padding:16px 12px 16px 0;'
+            'border-bottom:1px solid #e5e7eb;vertical-align:top">'
+            f'<img src="{escape(image_url)}" alt="{escape(title)}" '
+            'width="64" height="64" style="display:block;width:64px;height:64px;'
+            'border-radius:8px;object-fit:cover;background:#f0f7ed"></td>'
+            if image_url
+            else ""
+        )
         item_rows.append(
             "<tr>"
+            f"{image_cell}"
             '<td style="padding:16px 0;border-bottom:1px solid #e5e7eb;vertical-align:top">'
             f'<strong style="color:#0a0a0a;font-size:15px">{escape(title)}</strong>'
             f'<br><span style="color:#6a7282;font-size:13px">{item.quantity} × '

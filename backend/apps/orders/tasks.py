@@ -24,6 +24,11 @@ async def _send_order_preparing_email(
             order = await repository.get_admin_order(pool, order_id)
         except OrderNotFoundError:
             return False
+        try:
+            item_images = await repository.get_order_item_image_urls(pool, order_id)
+        except Exception:
+            logger.exception("Could not load order item images order_id=%s", order_id)
+            item_images = {}
     finally:
         await pool.close()
 
@@ -37,7 +42,7 @@ async def _send_order_preparing_email(
         return False
 
     service = EmailService(settings.sendgrid_api_key)
-    email = render_order_confirmation(order, language)
+    email = render_order_confirmation(order, language, item_images)
     status_code = await service.send_email(
         from_email=EmailFromAddress.INFO,
         to_emails=order.customer_email,

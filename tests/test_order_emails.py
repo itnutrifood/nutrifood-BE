@@ -16,6 +16,12 @@ from backend.config.settings import Settings
 from fastapi import HTTPException
 
 ORDER_ID = UUID("70000000-0000-0000-0000-000000000001")
+ORDER_ITEM_ID = UUID("71000000-0000-0000-0000-000000000001")
+IMAGE_URL = "https://cdn.example.test/products/bowl.jpg?size=64&v=1"
+PUBLIC_PRODUCT_IMAGE_URL = (
+    "https://dev-assets.nutrifood.am/products/images/"
+    "c25bc5aa-2f3a-41ed-bcc6-b8caf6268384.jpg"
+)
 
 
 def sample_order() -> OrderRead:
@@ -54,7 +60,7 @@ def sample_order() -> OrderRead:
             "delivery_notes": "Call on arrival",
             "items": [
                 {
-                    "id": UUID("71000000-0000-0000-0000-000000000001"),
+                    "id": ORDER_ITEM_ID,
                     "product_id": UUID("72000000-0000-0000-0000-000000000001"),
                     "product_slug": "mediterranean-bowl",
                     "product_title": {
@@ -72,8 +78,15 @@ def sample_order() -> OrderRead:
 
 
 class EmailTaskPool:
-    def __init__(self) -> None:
+    def __init__(self, image_url: str | None = IMAGE_URL) -> None:
         self.closed = False
+        self.image_url = image_url
+        self.image_query: str | None = None
+
+    async def fetch(self, query: str, *args: object) -> list[dict[str, object]]:
+        assert args == (ORDER_ID,)
+        self.image_query = query
+        return [{"item_id": ORDER_ITEM_ID, "image_url": self.image_url}]
 
     async def close(self) -> None:
         self.closed = True
@@ -113,6 +126,12 @@ async def test_order_confirmation_email_contains_saved_order_details(
     assert sent["from_email"] == "info@nutrifood.am"
     assert sent["to_emails"] == "jane@example.com"
     assert sent["subject"] == "NutriFood order #NFUX6Q8N6LD received"
+    assert pool.image_query is not None and "p.images -> 0 ->> 'url'" in pool.image_query
+    assert 'src="https://cdn.example.test/products/bowl.jpg?size=64&amp;v=1"' in sent[
+        "html_content"
+    ]
+    assert 'alt="Mediterranean Bowl"' in sent["html_content"]
+    assert IMAGE_URL not in sent["plain_text_content"]
     for value in (
         "NFUX6Q8N6LD",
         str(ORDER_ID),
@@ -189,13 +208,14 @@ def test_order_email_uses_selected_language_for_all_content(
     month: str,
     subject: str,
 ) -> None:
-    email = render_order_confirmation(sample_order(), language)
+    email = render_order_confirmation(sample_order(), language, {ORDER_ITEM_ID: IMAGE_URL})
 
     assert f'<html lang="{tag}">' in email.html
     for value in (heading, title, month):
         assert value in email.html
         assert value in email.plain_text
     assert email.subject == subject
+    assert f'alt="{title}"' in email.html
     if language != LanguageCode.EN_US:
         assert "Mediterranean Bowl" not in email.html
 
@@ -255,6 +275,22 @@ def test_order_email_lists_all_items_and_omits_optional_delivery_details() -> No
     assert "Green Salad" in email.plain_text
     assert "Requested delivery" not in email.html
     assert "Delivery notes" not in email.html
+
+
+@pytest.mark.parametrize("image_url", ["javascript:alert(1)", "http://cdn.example.test/a.jpg"])
+def test_order_email_omits_non_https_image_urls(image_url: str) -> None:
+    email = render_order_confirmation(sample_order(), item_images={ORDER_ITEM_ID: image_url})
+
+    assert "<img " not in email.html
+    assert "Mediterranean Bowl" in email.html
+
+
+def test_order_email_uses_public_product_image_url() -> None:
+    email = render_order_confirmation(
+        sample_order(), item_images={ORDER_ITEM_ID: PUBLIC_PRODUCT_IMAGE_URL}
+    )
+
+    assert f'src="{PUBLIC_PRODUCT_IMAGE_URL}"' in email.html
 
 
 @pytest.mark.asyncio
