@@ -177,7 +177,7 @@ def render_order_confirmation(
     plain_text = (
         f"{greeting}\n\n{t('heading')}\n{t('intro')}\n\n"
         f"{t('order_number')}: #{order.order_number}\n"
-        f"{t('order_id')}: {order.id}\n{t('placed')}: {placed_at}\n\n"
+        f"{t('placed')}: {placed_at}\n\n"
         f"{t('items')}\n{items_text}\n\n"
         f"{t('subtotal')}: {_money(order.subtotal, order.currency)}\n"
         f"{t('delivery')}: {_money(order.delivery_fee, order.currency)}\n"
@@ -206,7 +206,6 @@ def render_order_confirmation(
     )
     label_keys = (
         "order_number",
-        "order_id",
         "placed",
         "items",
         "subtotal",
@@ -232,7 +231,6 @@ def render_order_confirmation(
         greeting=escape(greeting),
         intro=escape(t("intro")),
         number=escape(order.order_number),
-        order_id=str(order.id),
         placed_at=escape(placed_at),
         rows="".join(item_rows),
         subtotal=escape(_money(order.subtotal, order.currency)),
