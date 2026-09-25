@@ -13,6 +13,7 @@ from backend.apps.checkout.exceptions import (
     IdempotencyConflictError,
 )
 from backend.apps.common.db import json_object
+from backend.apps.common.enums import LanguageCode
 from backend.apps.orders.repository import (
     ORDER_COLUMNS,
     ORDER_ITEM_COLUMNS,
@@ -52,6 +53,7 @@ async def place_order(
     idempotency_key: str,
     request_fingerprint: str,
     currency: str,
+    language: LanguageCode,
 ) -> PlaceOrderResult:
     async with pool.acquire() as connection, connection.transaction():
         # Serialize checkout attempts for one user so two different requests cannot consume
@@ -174,11 +176,12 @@ async def place_order(
                     requested_delivery_at,
                     delivery_notes,
                     idempotency_key,
-                    request_fingerprint
+                    request_fingerprint,
+                    email_language
                 )
                 VALUES (
                     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-                    $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25
+                    $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26
                 )
                 RETURNING {ORDER_COLUMNS.replace("o.", "")}
                 """,
@@ -207,6 +210,7 @@ async def place_order(
                 payload.delivery_notes,
                 idempotency_key,
                 request_fingerprint,
+                language.value,
             ),
         )
         if order_row is None:

@@ -7,7 +7,7 @@ from uuid import UUID
 import asyncpg
 
 from backend.apps.common.db import json_object
-from backend.apps.common.enums import OrderStatus, PaymentMethod, PaymentStatus
+from backend.apps.common.enums import LanguageCode, OrderStatus, PaymentMethod, PaymentStatus
 from backend.apps.common.pagination import page_count, page_offset
 from backend.apps.orders.exceptions import OrderNotFoundError
 from backend.apps.orders.schemas import (
@@ -26,6 +26,7 @@ ORDER_COLUMNS = """
     o.order_number,
     o.user_id,
     o.status,
+    o.email_language,
     o.payment_method,
     o.payment_status,
     o.subtotal,
@@ -85,6 +86,7 @@ def order_summary_from_record(record: Mapping[str, object]) -> OrderSummaryRead:
         order_number=cast(str, record["order_number"]),
         user_id=cast(UUID, record["user_id"]),
         status=OrderStatus(cast(str, record["status"])),
+        email_language=LanguageCode(cast(str, record["email_language"])),
         payment_method=PaymentMethod(cast(str, record["payment_method"])),
         payment_status=PaymentStatus(cast(str, record["payment_status"])),
         subtotal=cast(Decimal, record["subtotal"]),
@@ -263,14 +265,14 @@ async def update_order_status(
     pool: asyncpg.Pool,
     order_id: UUID,
     status: OrderStatus,
-) -> OrderRead:
+) -> tuple[OrderRead, bool]:
     order_row = cast(
         Mapping[str, object] | None,
         await pool.fetchrow(
             f"""
             UPDATE orders AS o
             SET status = $1
-            WHERE o.id = $2
+            WHERE o.id = $2 AND o.status IS DISTINCT FROM $1
             RETURNING {ORDER_COLUMNS}
             """,
             status.value,
@@ -278,7 +280,7 @@ async def update_order_status(
         ),
     )
     if order_row is None:
-        raise OrderNotFoundError
+        return await get_admin_order(pool, order_id), False
 
     item_rows = cast(
         Sequence[Mapping[str, object]],
@@ -292,4 +294,4 @@ async def update_order_status(
             order_id,
         ),
     )
-    return order_from_records(order_row, item_rows)
+    return order_from_records(order_row, item_rows), True

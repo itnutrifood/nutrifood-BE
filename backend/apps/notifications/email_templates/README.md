@@ -8,6 +8,11 @@ renderer also builds a plain-text version from the same translations.
 Checkout accepts `X-Locale: en|hy|ru` for the language selected on the website. If it is absent,
 the API uses the best supported `Accept-Language` value, then English. The resolved language is
 passed with the queued email job. Existing jobs without a language still render in English.
+The checkout language is also saved on the order so later delivery updates use the same language.
+
+Admin updates to preparing, out for delivery, and delivered queue an email only when the status
+actually changes. Each status has its own subject, heading, and message in the `status_updates`
+section of every locale file. These emails reuse the complete order receipt layout.
 
 The `{number}`, `{total}`, and `{name}` placeholders in the translation files are filled by the
 renderer. Customer and catalog values are escaped before insertion into HTML.

@@ -1,4 +1,4 @@
-"""Render order confirmations from a shared layout and language-specific copy."""
+"""Render order emails from a shared layout and language-specific copy."""
 
 import json
 from collections.abc import Mapping
@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from backend.apps.common.enums import LanguageCode, PaymentMethod, PaymentStatus
+from backend.apps.common.enums import LanguageCode, OrderStatus, PaymentMethod, PaymentStatus
 from backend.apps.orders.schemas import OrderRead
 
 ARMENIA_TIME = ZoneInfo("Asia/Yerevan")
@@ -127,7 +127,32 @@ def render_order_confirmation(
     item_images: Mapping[UUID, str] | None = None,
 ) -> OrderEmail:
     """Build localized HTML and plain-text receipts from the saved order snapshot."""
+    return _render_order_email(order, language, item_images, _translation(language))
+
+
+def render_order_status_update(
+    order: OrderRead,
+    status: OrderStatus,
+    language: LanguageCode = LanguageCode.EN_US,
+    item_images: Mapping[UUID, str] | None = None,
+) -> OrderEmail:
+    """Build a status-specific update with the complete order details."""
     copy = _translation(language)
+    updates = copy["status_updates"]
+    if not isinstance(updates, dict):
+        raise ValueError("Invalid order status email translations")
+    message = updates.get(status.value)
+    if not isinstance(message, dict):
+        raise ValueError(f"Unsupported order email status: {status.value}")
+    return _render_order_email(order, language, item_images, {**copy, **message})
+
+
+def _render_order_email(
+    order: OrderRead,
+    language: LanguageCode,
+    item_images: Mapping[UUID, str] | None,
+    copy: dict[str, object],
+) -> OrderEmail:
 
     def t(key: str) -> str:
         return _text(copy, key)

@@ -60,12 +60,14 @@ def order_record(
     payment_method: str = "cash_on_delivery",
     request_fingerprint: str = "a" * 64,
     requested_delivery_at: datetime | None = REQUESTED_DELIVERY_AT,
+    email_language: str = "EN-US",
 ) -> dict[str, object]:
     return {
         "id": ORDER_ID,
         "order_number": "NFUX6Q8N6LD",
         "user_id": USER_ID,
         "status": status,
+        "email_language": email_language,
         "payment_method": payment_method,
         "payment_status": "unpaid",
         "subtotal": Decimal("25.98"),
@@ -190,11 +192,13 @@ class CheckoutPool:
             assert args[20] == "yandex"
             assert args[21] == self.requested_delivery_at
             assert args[23] == "checkout-attempt-1"
+            assert args[25] in {"EN-US", "HY-AM", "RU-RU"}
             self.idempotency_key = str(args[23])
             self.stored_order = order_record(
                 payment_method=str(args[1]),
                 request_fingerprint=str(args[24]),
                 requested_delivery_at=args[21],  # type: ignore[arg-type]
+                email_language=str(args[25]),
             )
             self.order_insert_count += 1
             return self.stored_order
@@ -270,8 +274,12 @@ class UpdateOrderStatusPool:
     def __init__(self, *, order_exists: bool = True) -> None:
         self.order_exists = order_exists
         self.updated_statuses: list[str] = []
+        self.current_status = "pending"
 
     async def fetchrow(self, query: str, *args: object) -> dict[str, object] | None:
+        if "FROM orders AS o" in query:
+            assert args == (ORDER_ID,)
+            return order_record(status=self.current_status) if self.order_exists else None
         assert "UPDATE orders AS o" in query
         assert "SET status = $1" in query
         assert args[1] == ORDER_ID
@@ -279,6 +287,9 @@ class UpdateOrderStatusPool:
             return None
 
         updated_status = str(args[0])
+        if updated_status == self.current_status:
+            return None
+        self.current_status = updated_status
         self.updated_statuses.append(updated_status)
         return order_record(status=updated_status)
 
@@ -295,7 +306,9 @@ def configure_test_app(
     authenticated: bool = True,
     admin_authenticated: bool = False,
     enqueued_email_order_ids: list[tuple[UUID, str]] | None = None,
+    enqueued_statuses: list[tuple[UUID, str]] | None = None,
 ) -> Any:
+    from backend.apps.orders.service import send_order_status_email
     from backend.config import database
     from backend.config.asgi import app
 
@@ -306,6 +319,15 @@ def configure_test_app(
         lambda order_id, language: (
             enqueued_email_order_ids.append((UUID(order_id), language))
             if enqueued_email_order_ids is not None
+            else None
+        ),
+    )
+    monkeypatch.setattr(
+        send_order_status_email,
+        "delay",
+        lambda order_id, status: (
+            enqueued_statuses.append((UUID(order_id), status))
+            if enqueued_statuses is not None
             else None
         ),
     )
@@ -382,6 +404,7 @@ def test_place_order_snapshots_server_totals_clears_cart_and_replays_safely(
     assert pool.deleted_product_ids == [PRODUCT_ID]
     assert pool.advisory_lock_count == 2
     assert enqueued_email_order_ids == [(ORDER_ID, "HY-AM")]
+    assert pool.stored_order is not None and pool.stored_order["email_language"] == "HY-AM"
 
 
 def test_checkout_uses_accept_language_for_order_email(monkeypatch: Any) -> None:
@@ -408,6 +431,7 @@ def test_checkout_uses_accept_language_for_order_email(monkeypatch: Any) -> None
 
     assert response.status_code == 201
     assert enqueued_email_order_ids == [(ORDER_ID, "RU-RU")]
+    assert pool.stored_order is not None and pool.stored_order["email_language"] == "RU-RU"
 
 
 def test_place_order_rejects_requested_delivery_at_without_timezone(monkeypatch: Any) -> None:
@@ -583,7 +607,10 @@ def test_admin_can_see_all_orders_and_filter_them(monkeypatch: Any) -> None:
 
 def test_admin_can_switch_order_fulfillment_status(monkeypatch: Any) -> None:
     pool = UpdateOrderStatusPool()
-    app = configure_test_app(monkeypatch, pool, admin_authenticated=True)
+    enqueued_statuses: list[tuple[UUID, str]] = []
+    app = configure_test_app(
+        monkeypatch, pool, admin_authenticated=True, enqueued_statuses=enqueued_statuses
+    )
 
     try:
         with TestClient(app) as client:
@@ -604,6 +631,35 @@ def test_admin_can_switch_order_fulfillment_status(monkeypatch: Any) -> None:
         "delivered",
     ]
     assert pool.updated_statuses == ["preparing", "out_for_delivery", "delivered"]
+    assert enqueued_statuses == [
+        (ORDER_ID, "preparing"),
+        (ORDER_ID, "out_for_delivery"),
+        (ORDER_ID, "delivered"),
+    ]
+
+
+def test_admin_repeating_status_does_not_send_another_email(monkeypatch: Any) -> None:
+    pool = UpdateOrderStatusPool()
+    enqueued_statuses: list[tuple[UUID, str]] = []
+    app = configure_test_app(
+        monkeypatch, pool, admin_authenticated=True, enqueued_statuses=enqueued_statuses
+    )
+
+    try:
+        with TestClient(app) as client:
+            responses = [
+                client.patch(
+                    f"/api/v1/admin/orders/{ORDER_ID}/status",
+                    json={"status": "preparing"},
+                )
+                for _ in range(2)
+            ]
+    finally:
+        app.dependency_overrides.clear()
+
+    assert [response.status_code for response in responses] == [200, 200]
+    assert pool.updated_statuses == ["preparing"]
+    assert enqueued_statuses == [(ORDER_ID, "preparing")]
 
 
 def test_admin_order_status_update_rejects_other_statuses(monkeypatch: Any) -> None:

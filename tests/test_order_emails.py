@@ -1,12 +1,16 @@
 from datetime import UTC, datetime
 from decimal import Decimal
+from html import escape
 from typing import Any
 from uuid import UUID
 
 import pytest
-from backend.apps.common.enums import LanguageCode
+from backend.apps.common.enums import LanguageCode, OrderStatus
 from backend.apps.common.localization import resolve_email_language
-from backend.apps.notifications.email_templates.order_confirmation import render_order_confirmation
+from backend.apps.notifications.email_templates.order_confirmation import (
+    render_order_confirmation,
+    render_order_status_update,
+)
 from backend.apps.orders import tasks
 from backend.apps.orders.exceptions import OrderNotFoundError
 from backend.apps.orders.schemas import OrderRead
@@ -19,8 +23,7 @@ ORDER_ID = UUID("70000000-0000-0000-0000-000000000001")
 ORDER_ITEM_ID = UUID("71000000-0000-0000-0000-000000000001")
 IMAGE_URL = "https://cdn.example.test/products/bowl.jpg?size=64&v=1"
 PUBLIC_PRODUCT_IMAGE_URL = (
-    "https://dev-assets.nutrifood.am/products/images/"
-    "c25bc5aa-2f3a-41ed-bcc6-b8caf6268384.jpg"
+    "https://dev-assets.nutrifood.am/products/images/c25bc5aa-2f3a-41ed-bcc6-b8caf6268384.jpg"
 )
 
 
@@ -127,9 +130,9 @@ async def test_order_confirmation_email_contains_saved_order_details(
     assert sent["to_emails"] == "jane@example.com"
     assert sent["subject"] == "NutriFood order #NFUX6Q8N6LD received"
     assert pool.image_query is not None and "p.images -> 0 ->> 'url'" in pool.image_query
-    assert 'src="https://cdn.example.test/products/bowl.jpg?size=64&amp;v=1"' in sent[
-        "html_content"
-    ]
+    assert (
+        'src="https://cdn.example.test/products/bowl.jpg?size=64&amp;v=1"' in sent["html_content"]
+    )
     assert 'alt="Mediterranean Bowl"' in sent["html_content"]
     assert IMAGE_URL not in sent["plain_text_content"]
     assert str(ORDER_ID) not in sent["plain_text_content"]
@@ -294,6 +297,79 @@ def test_order_email_uses_public_product_image_url() -> None:
     )
 
     assert f'src="{PUBLIC_PRODUCT_IMAGE_URL}"' in email.html
+
+
+@pytest.mark.parametrize(
+    ("language", "status", "heading"),
+    [
+        (LanguageCode.EN_US, OrderStatus.PREPARING, "We're preparing your order"),
+        (LanguageCode.EN_US, OrderStatus.OUT_FOR_DELIVERY, "Your order is on its way"),
+        (LanguageCode.EN_US, OrderStatus.DELIVERED, "Enjoy your order!"),
+        (LanguageCode.HY_AM, OrderStatus.PREPARING, "Արդեն պատրաստում ենք Ձեր պատվերը"),
+        (LanguageCode.HY_AM, OrderStatus.OUT_FOR_DELIVERY, "Ձեր պատվերը ճանապարհին է"),
+        (LanguageCode.HY_AM, OrderStatus.DELIVERED, "Բարի ախորժակ։"),
+        (LanguageCode.RU_RU, OrderStatus.PREPARING, "Мы уже готовим ваш заказ"),
+        (LanguageCode.RU_RU, OrderStatus.OUT_FOR_DELIVERY, "Ваш заказ уже в пути"),
+        (LanguageCode.RU_RU, OrderStatus.DELIVERED, "Приятного аппетита!"),
+    ],
+)
+def test_status_email_keeps_order_details_in_each_language(
+    language: LanguageCode, status: OrderStatus, heading: str
+) -> None:
+    order = sample_order().model_copy(update={"status": status})
+    email = render_order_status_update(
+        order, status, language, {ORDER_ITEM_ID: PUBLIC_PRODUCT_IMAGE_URL}
+    )
+
+    assert escape(heading) in email.html
+    assert heading in email.plain_text
+    assert "NFUX6Q8N6LD" in email.subject
+    assert f'src="{PUBLIC_PRODUCT_IMAGE_URL}"' in email.html
+    assert str(ORDER_ID) not in email.html
+    assert str(ORDER_ID) not in email.plain_text
+    for value in ("25.98 USD", "2.00 USD", "27.98 USD", "Northern Avenue", "+37499123456"):
+        assert value in email.html
+        assert value in email.plain_text
+    assert "status has changed" not in email.plain_text
+
+
+@pytest.mark.asyncio
+async def test_status_email_uses_saved_order_language_and_skips_stale_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pool = EmailTaskPool(PUBLIC_PRODUCT_IMAGE_URL)
+    order = sample_order().model_copy(
+        update={"status": OrderStatus.OUT_FOR_DELIVERY, "email_language": LanguageCode.RU_RU}
+    )
+    sent: list[dict[str, Any]] = []
+
+    async def create_task_pool() -> EmailTaskPool:
+        return pool
+
+    async def get_order(task_pool: object, order_id: UUID) -> OrderRead:
+        assert task_pool is pool
+        assert order_id == ORDER_ID
+        return order
+
+    async def fake_send_email(service: EmailService, **message: Any) -> int:
+        sent.append(message)
+        return 202
+
+    monkeypatch.setattr(tasks, "create_pool", create_task_pool)
+    monkeypatch.setattr(tasks.repository, "get_admin_order", get_order)
+    monkeypatch.setattr(
+        tasks,
+        "get_settings",
+        lambda: Settings(_env_file=None, sendgrid_api_key="sendgrid-api-key"),
+    )
+    monkeypatch.setattr(EmailService, "send_email", fake_send_email)
+
+    assert await tasks._send_order_status_email(ORDER_ID, OrderStatus.PREPARING) is False
+    assert sent == []
+    assert await tasks._send_order_status_email(ORDER_ID, OrderStatus.OUT_FOR_DELIVERY) is True
+    assert sent[0]["subject"] == "Ваш заказ NutriFood №NFUX6Q8N6LD уже в пути"
+    assert "Средиземноморский боул" in sent[0]["html_content"]
+    assert PUBLIC_PRODUCT_IMAGE_URL in sent[0]["html_content"]
 
 
 @pytest.mark.asyncio

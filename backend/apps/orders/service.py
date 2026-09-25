@@ -1,3 +1,4 @@
+import logging
 from uuid import UUID
 
 import asyncpg
@@ -5,6 +6,9 @@ import asyncpg
 from backend.apps.common.enums import OrderStatus, PaymentMethod
 from backend.apps.orders import repository
 from backend.apps.orders.schemas import OrderListResponse, OrderRead
+from backend.apps.orders.tasks import send_order_status_email
+
+logger = logging.getLogger(__name__)
 
 
 async def list_user_orders(
@@ -54,4 +58,10 @@ async def update_admin_order_status(
     order_id: UUID,
     status: OrderStatus,
 ) -> OrderRead:
-    return await repository.update_order_status(pool, order_id, status)
+    order, changed = await repository.update_order_status(pool, order_id, status)
+    if changed:
+        try:
+            send_order_status_email.delay(str(order_id), status.value)
+        except Exception:
+            logger.exception("Could not enqueue order status email order_id=%s", order_id)
+    return order

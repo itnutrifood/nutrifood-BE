@@ -38,6 +38,7 @@ async def place_order(
         idempotency_key,
         request_fingerprint(payload),
         currency,
+        language,
     )
     if result.created:
         try:

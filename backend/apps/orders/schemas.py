@@ -5,7 +5,7 @@ from uuid import UUID
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, StringConstraints
 
-from backend.apps.common.enums import OrderStatus, PaymentMethod, PaymentStatus
+from backend.apps.common.enums import LanguageCode, OrderStatus, PaymentMethod, PaymentStatus
 from backend.apps.common.pagination import Page
 from backend.apps.products.schemas import LocalizedText
 from backend.apps.users.addresses.enums import AddressLocationSource, ArmeniaRegion, Country
@@ -69,6 +69,7 @@ class OrderSummaryRead(BaseModel):
     order_number: OrderNumber
     user_id: UUID
     status: OrderStatus
+    email_language: LanguageCode = LanguageCode.EN_US
     payment_method: PaymentMethod
     payment_status: PaymentStatus
     subtotal: Decimal

@@ -31,5 +31,28 @@
   "time_zone": "Armenia time",
   "contact_help": "Questions about your order? Reply to this email or write to",
   "tagline": "Healthy food, delivered.",
+  "status_updates": {
+    "preparing": {
+      "subject": "We're preparing your NutriFood order #{number}",
+      "preheader": "We're preparing order #{number} · Total {total}",
+      "badge": "IN THE KITCHEN",
+      "heading": "We're preparing your order",
+      "intro": "Your food is in good hands. We're getting everything ready for delivery."
+    },
+    "out_for_delivery": {
+      "subject": "Your NutriFood order #{number} is on its way",
+      "preheader": "Order #{number} is on its way · Total {total}",
+      "badge": "ON THE WAY",
+      "heading": "Your order is on its way",
+      "intro": "Your food is heading to you. Please keep your phone nearby in case our courier needs to reach you."
+    },
+    "delivered": {
+      "subject": "Your NutriFood order #{number} has arrived",
+      "preheader": "Order #{number} has arrived · Total {total}",
+      "badge": "DELIVERED",
+      "heading": "Enjoy your order!",
+      "intro": "Your food has arrived. Thank you for choosing NutriFood, and enjoy your meal!"
+    }
+  },
   "months": ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
 }
