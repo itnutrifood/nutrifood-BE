@@ -132,9 +132,10 @@ async def test_order_confirmation_email_contains_saved_order_details(
     ]
     assert 'alt="Mediterranean Bowl"' in sent["html_content"]
     assert IMAGE_URL not in sent["plain_text_content"]
+    assert str(ORDER_ID) not in sent["plain_text_content"]
+    assert str(ORDER_ID) not in sent["html_content"]
     for value in (
         "NFUX6Q8N6LD",
-        str(ORDER_ID),
         "Mediterranean Bowl",
         "2 × 12.99 USD",
         "25.98 USD",
@@ -216,6 +217,8 @@ def test_order_email_uses_selected_language_for_all_content(
         assert value in email.plain_text
     assert email.subject == subject
     assert f'alt="{title}"' in email.html
+    assert str(ORDER_ID) not in email.html
+    assert str(ORDER_ID) not in email.plain_text
     if language != LanguageCode.EN_US:
         assert "Mediterranean Bowl" not in email.html
 
