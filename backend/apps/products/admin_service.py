@@ -6,7 +6,10 @@ import asyncpg
 from backend.apps.assets.service import delete_product_image_urls
 from backend.apps.assets.storage import AssetObjectStorage
 from backend.apps.products import repository
-from backend.apps.products.exceptions import ProductCategoryNotFoundError
+from backend.apps.products.exceptions import (
+    ProductCategoryNotFoundError,
+    ProductIngredientNotFoundError,
+)
 from backend.apps.products.schemas import (
     ProductCreate,
     ProductListResponse,
@@ -23,8 +26,14 @@ async def _ensure_categories_exist(
         raise ProductCategoryNotFoundError
 
 
+async def _ensure_ingredients_exist(pool: asyncpg.Pool, ingredient_ids: Sequence[UUID]) -> None:
+    if not await repository.ingredients_exist(pool, ingredient_ids):
+        raise ProductIngredientNotFoundError
+
+
 async def create_product(pool: asyncpg.Pool, payload: ProductCreate) -> ProductRead:
     await _ensure_categories_exist(pool, payload.category_ids)
+    await _ensure_ingredients_exist(pool, payload.ingredient_ids)
     return await repository.create_product(pool, payload)
 
 
@@ -49,6 +58,8 @@ async def update_product(
 ) -> ProductRead:
     if "category_ids" in payload.model_fields_set:
         await _ensure_categories_exist(pool, payload.category_ids or [])
+    if "ingredient_ids" in payload.model_fields_set:
+        await _ensure_ingredients_exist(pool, payload.ingredient_ids or [])
 
     previous_image_urls: set[str] = set()
     if "images" in payload.model_fields_set:

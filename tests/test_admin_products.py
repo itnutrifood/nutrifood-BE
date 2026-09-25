@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 PRODUCT_ID = UUID("10000000-0000-0000-0000-000000000001")
 CATEGORY_ID = UUID("20000000-0000-0000-0000-000000000001")
+INGREDIENT_ID = UUID("30000000-0000-0000-0000-000000000001")
 ADMIN_ID = UUID("40000000-0000-0000-0000-000000000001")
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 ASSET_BASE_URL = "https://assets.example.test"
@@ -218,6 +219,26 @@ class DeleteProductPool:
         return "DELETE 1"
 
 
+class ProductIngredientsPool:
+    def __init__(self, *, missing: bool = False) -> None:
+        self.missing = missing
+        self.write_query: str | None = None
+        self.write_args: tuple[object, ...] | None = None
+
+    async def fetch(self, query: str, *args: object) -> list[dict[str, object]]:
+        if "SELECT id FROM categories" in query:
+            return [{"id": CATEGORY_ID}]
+        if "SELECT id FROM ingredients" in query:
+            assert args == ([INGREDIENT_ID],)
+            return [] if self.missing else [{"id": INGREDIENT_ID}]
+        raise AssertionError(f"Unexpected query: {query}")
+
+    async def fetchrow(self, query: str, *args: object) -> dict[str, object]:
+        self.write_query = query
+        self.write_args = args
+        return product_record()
+
+
 def configure_test_app(
     monkeypatch: Any,
     pool: object,
@@ -260,6 +281,55 @@ def test_admin_can_create_product(monkeypatch: Any) -> None:
         }
     ]
     assert json.loads(str(pool.insert_args[4])) == localized_words("High Protein")
+
+
+def test_admin_product_ingredients_are_inserted_and_replaced(monkeypatch: Any) -> None:
+    pool = ProductIngredientsPool()
+    app = configure_test_app(monkeypatch, pool)
+    payload = product_payload()
+    payload["ingredient_ids"] = [str(INGREDIENT_ID)]
+
+    try:
+        with TestClient(app) as client:
+            created = client.post("/api/v1/admin/products", json=payload)
+            create_query, create_args = pool.write_query, pool.write_args
+            updated = client.patch(
+                f"/api/v1/admin/products/{PRODUCT_ID}",
+                json={"ingredient_ids": []},
+            )
+            update_query, update_args = pool.write_query, pool.write_args
+    finally:
+        app.dependency_overrides.clear()
+
+    assert created.status_code == 201
+    assert created.json()["ingredient_ids"] == [str(INGREDIENT_ID)]
+    assert create_query is not None and "INSERT INTO product_ingredients" in create_query
+    assert create_args is not None and create_args[-1] == [INGREDIENT_ID]
+    assert updated.status_code == 200
+    assert updated.json()["ingredient_ids"] == []
+    assert update_query is not None and "DELETE FROM product_ingredients" in update_query
+    assert update_query is not None and "ON CONFLICT (product_id, ingredient_id)" in update_query
+    assert update_args == (PRODUCT_ID, [])
+
+
+def test_admin_product_rejects_unknown_or_duplicate_ingredients(monkeypatch: Any) -> None:
+    pool = ProductIngredientsPool(missing=True)
+    app = configure_test_app(monkeypatch, pool)
+    payload = product_payload()
+    payload["ingredient_ids"] = [str(INGREDIENT_ID)]
+
+    try:
+        with TestClient(app) as client:
+            missing = client.post("/api/v1/admin/products", json=payload)
+            payload["ingredient_ids"] = [str(INGREDIENT_ID), str(INGREDIENT_ID)]
+            duplicate = client.post("/api/v1/admin/products", json=payload)
+    finally:
+        app.dependency_overrides.clear()
+
+    assert missing.status_code == 404
+    assert missing.json()["detail"] == "Product ingredient not found"
+    assert duplicate.status_code == 422
+    assert pool.write_query is None
 
 
 def test_admin_can_list_products_by_category(monkeypatch: Any) -> None:

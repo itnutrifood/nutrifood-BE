@@ -14,6 +14,7 @@ from backend.apps.common.pagination import page_count, page_offset
 from backend.apps.products.exceptions import (
     DuplicateProductSlugError,
     ProductCategoryNotFoundError,
+    ProductIngredientNotFoundError,
     ProductNotFoundError,
 )
 from backend.apps.products.schemas import (
@@ -48,7 +49,12 @@ PRODUCT_COLUMNS = """
         SELECT COALESCE(array_agg(pc.category_id ORDER BY pc.category_id), ARRAY[]::uuid[])
         FROM product_categories AS pc
         WHERE pc.product_id = p.id
-    ) AS category_ids
+    ) AS category_ids,
+    (
+        SELECT COALESCE(array_agg(pi.ingredient_id ORDER BY pi.ingredient_id), ARRAY[]::uuid[])
+        FROM product_ingredients AS pi
+        WHERE pi.product_id = p.id
+    ) AS ingredient_ids
 """
 
 
@@ -121,6 +127,7 @@ def product_from_record(record: Mapping[str, object]) -> ProductRead:
         description=LocalizedText.model_validate(json_object(record["description"])),
         images=[ProductImage.model_validate(item) for item in json_array(record["images"])],
         category_ids=_category_ids_from_record(record["category_ids"]),
+        ingredient_ids=_category_ids_from_record(record.get("ingredient_ids")),
         image_tags=LocalizedWords.model_validate(json_object(record["image_tags"])),
         text_tags=LocalizedWords.model_validate(json_object(record["text_tags"])),
         serving_size=OptionalLocalizedText.model_validate(json_object(record["serving_size"])),
@@ -151,6 +158,18 @@ async def categories_exist(pool: asyncpg.Pool, category_ids: Sequence[UUID]) -> 
     )
     existing_category_ids = {cast(UUID, row["id"]) for row in rows}
     return existing_category_ids == set(category_ids)
+
+
+async def ingredients_exist(pool: asyncpg.Pool, ingredient_ids: Sequence[UUID]) -> bool:
+    if not ingredient_ids:
+        return True
+    rows = cast(
+        Sequence[Mapping[str, object]],
+        await pool.fetch(
+            "SELECT id FROM ingredients WHERE id = ANY($1::uuid[])", list(ingredient_ids)
+        ),
+    )
+    return {cast(UUID, row["id"]) for row in rows} == set(ingredient_ids)
 
 
 async def create_product(pool: asyncpg.Pool, payload: ProductCreate) -> ProductRead:
@@ -196,6 +215,13 @@ async def create_product(pool: asyncpg.Pool, payload: ProductCreate) -> ProductR
                     FROM inserted_product
                     CROSS JOIN unnest($13::uuid[]) AS category_id
                     RETURNING category_id
+                ),
+                inserted_ingredients AS (
+                    INSERT INTO product_ingredients (product_id, ingredient_id)
+                    SELECT inserted_product.id, ingredient_id
+                    FROM inserted_product
+                    CROSS JOIN unnest($14::uuid[]) AS ingredient_id
+                    RETURNING ingredient_id
                 )
                 SELECT {PRODUCT_COLUMNS}
                 FROM inserted_product AS p
@@ -213,17 +239,22 @@ async def create_product(pool: asyncpg.Pool, payload: ProductCreate) -> ProductR
                 json.dumps(payload.allergen_information.to_db()),
                 json.dumps(payload.storage_delivery.to_db()),
                 payload.category_ids,
+                payload.ingredient_ids,
             ),
         )
     except asyncpg.UniqueViolationError as exc:
         raise DuplicateProductSlugError from exc
     except asyncpg.ForeignKeyViolationError as exc:
+        if exc.constraint_name == "product_ingredients_ingredient_id_fkey":
+            raise ProductIngredientNotFoundError from exc
         raise ProductCategoryNotFoundError from exc
 
     if row is None:
         raise RuntimeError("Product insert did not return a row")
 
-    return product_from_record(row)
+    product = product_from_record(row)
+    product.ingredient_ids = sorted(payload.ingredient_ids)
+    return product
 
 
 async def get_product(pool: asyncpg.Pool, product_id: UUID) -> ProductRead:
@@ -304,6 +335,7 @@ async def update_product(
     payload: ProductUpdate,
 ) -> ProductRead:
     category_ids_were_set = "category_ids" in payload.model_fields_set
+    ingredient_ids_were_set = "ingredient_ids" in payload.model_fields_set
     assignments: list[str] = []
     params: list[Any] = [product_id]
 
@@ -375,6 +407,28 @@ async def update_product(
             )
         """
 
+    ingredient_ctes = ""
+    if ingredient_ids_were_set:
+        params.append(cast(list[UUID], payload.ingredient_ids))
+        ingredient_ids_param = len(params)
+        ingredient_ctes = f"""
+            ,
+            deleted_ingredients AS (
+                DELETE FROM product_ingredients
+                WHERE product_id = (SELECT id FROM selected_product)
+                  AND NOT (ingredient_id = ANY(${ingredient_ids_param}::uuid[]))
+                RETURNING ingredient_id
+            ),
+            inserted_ingredients AS (
+                INSERT INTO product_ingredients (product_id, ingredient_id)
+                SELECT selected_product.id, ingredient_id
+                FROM selected_product
+                CROSS JOIN unnest(${ingredient_ids_param}::uuid[]) AS ingredient_id
+                ON CONFLICT (product_id, ingredient_id) DO NOTHING
+                RETURNING ingredient_id
+            )
+        """
+
     try:
         row = cast(
             Mapping[str, object] | None,
@@ -384,6 +438,7 @@ async def update_product(
                     {selected_product_statement}
                 )
                 {category_ctes}
+                {ingredient_ctes}
                 SELECT {PRODUCT_COLUMNS}
                 FROM products AS p
                 WHERE p.id = (SELECT id FROM selected_product)
@@ -394,12 +449,53 @@ async def update_product(
     except asyncpg.UniqueViolationError as exc:
         raise DuplicateProductSlugError from exc
     except asyncpg.ForeignKeyViolationError as exc:
+        if exc.constraint_name == "product_ingredients_ingredient_id_fkey":
+            raise ProductIngredientNotFoundError from exc
         raise ProductCategoryNotFoundError from exc
 
     if row is None:
         raise ProductNotFoundError
 
-    return product_from_record(row)
+    product = product_from_record(row)
+    if ingredient_ids_were_set:
+        product.ingredient_ids = sorted(cast(list[UUID], payload.ingredient_ids))
+    return product
+
+
+async def blacklisted_ingredient_matches(
+    pool: asyncpg.Pool,
+    product_ids: Sequence[UUID],
+    user_id: UUID,
+    language: LanguageCode,
+) -> dict[UUID, list[tuple[UUID, str]]]:
+    if not product_ids:
+        return {}
+    rows = cast(
+        Sequence[Mapping[str, object]],
+        await pool.fetch(
+            """
+            SELECT pi.product_id, i.id AS ingredient_id, i.name ->> $3::text AS name
+            FROM product_ingredients AS pi
+            JOIN ingredients AS i ON i.id = pi.ingredient_id
+            JOIN user_ingredient_preferences AS preference
+              ON preference.ingredient_id = i.id
+             AND preference.user_id = $2
+             AND preference.preference = 'blacklisted'
+            WHERE pi.product_id = ANY($1::uuid[])
+            ORDER BY pi.product_id, i.id
+            """,
+            list(product_ids),
+            user_id,
+            language.value,
+        ),
+    )
+    matches: dict[UUID, list[tuple[UUID, str]]] = {}
+    for row in rows:
+        product_id = cast(UUID, row["product_id"])
+        matches.setdefault(product_id, []).append(
+            (cast(UUID, row["ingredient_id"]), cast(str, row["name"]))
+        )
+    return matches
 
 
 async def delete_product(pool: asyncpg.Pool, product_id: UUID) -> None:

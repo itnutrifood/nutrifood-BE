@@ -49,6 +49,7 @@ from backend.apps.orders.exceptions import OrderNotFoundError
 from backend.apps.products.exceptions import (
     DuplicateProductSlugError,
     ProductCategoryNotFoundError,
+    ProductIngredientNotFoundError,
     ProductNotFoundError,
 )
 from backend.apps.subscriptions.exceptions import (
@@ -91,6 +92,7 @@ DOMAIN_EXCEPTION_TYPES: tuple[type[Exception], ...] = (
     OpenPositionNotFoundError,
     ProductNotFoundError,
     ProductCategoryNotFoundError,
+    ProductIngredientNotFoundError,
     DuplicateProductSlugError,
     SubscriptionPlanNotFoundError,
     DuplicateSubscriptionPlanSlugError,
@@ -195,6 +197,8 @@ async def domain_exception_handler(_request: Request, exc: Exception) -> JSONRes
         return _not_found("Product not found")
     if isinstance(exc, ProductCategoryNotFoundError):
         return _not_found("Product category not found")
+    if isinstance(exc, ProductIngredientNotFoundError):
+        return _not_found("Product ingredient not found")
     if isinstance(exc, DuplicateProductSlugError):
         return _conflict("Product slug already exists")
     if isinstance(exc, SubscriptionPlanNotFoundError):

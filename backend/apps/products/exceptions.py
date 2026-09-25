@@ -8,3 +8,7 @@ class DuplicateProductSlugError(Exception):
 
 class ProductCategoryNotFoundError(Exception):
     pass
+
+
+class ProductIngredientNotFoundError(Exception):
+    pass

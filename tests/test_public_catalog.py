@@ -13,6 +13,8 @@ CATEGORY_ID = UUID("00000000-0000-0000-0000-000000000001")
 NEXT_CATEGORY_ID = UUID("00000000-0000-0000-0000-000000000002")
 PRODUCT_ID = UUID("10000000-0000-0000-0000-000000000001")
 NEXT_PRODUCT_ID = UUID("10000000-0000-0000-0000-000000000002")
+INGREDIENT_ID = UUID("20000000-0000-0000-0000-000000000001")
+USER_ID = UUID("40000000-0000-0000-0000-000000000001")
 SUBSCRIPTION_PLAN_ID = UUID("30000000-0000-0000-0000-000000000001")
 NEXT_SUBSCRIPTION_PLAN_ID = UUID("30000000-0000-0000-0000-000000000002")
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
@@ -301,6 +303,61 @@ class PublicProductLanguageSearchPool:
         assert f"p.title ->> '{self.title_key}'" in query
         assert args == ("meal", 2)
         return []
+
+
+class BlacklistedProductPool:
+    def __init__(self) -> None:
+        self.match_requests = 0
+
+    async def fetch(self, query: str, *args: object) -> list[dict[str, object]]:
+        if "SELECT pi.product_id, i.id AS ingredient_id" in query:
+            self.match_requests += 1
+            assert "preference.preference = 'blacklisted'" in query
+            assert args in (
+                ([PRODUCT_ID, NEXT_PRODUCT_ID], USER_ID, "RU-RU"),
+                ([PRODUCT_ID], USER_ID, "RU-RU"),
+            )
+            return [{"product_id": PRODUCT_ID, "ingredient_id": INGREDIENT_ID, "name": "Арахис"}]
+        assert "FROM products AS p" in query
+        return [
+            product_record(),
+            product_record(product_id=NEXT_PRODUCT_ID, slug="fresh-bowl"),
+        ]
+
+    async def fetchrow(self, query: str, *args: object) -> dict[str, object]:
+        assert "FROM products AS p" in query
+        assert args == (PRODUCT_ID,) or args == ("mediterranean-bowl",)
+        return product_record()
+
+
+def test_authenticated_product_list_and_details_show_localized_blacklist_matches(
+    monkeypatch: Any,
+) -> None:
+    from backend.apps.accounts.dependencies import get_optional_current_user
+
+    pool = BlacklistedProductPool()
+    app = configure_test_app(monkeypatch, pool)
+    app.dependency_overrides[get_optional_current_user] = lambda: type(
+        "User", (), {"id": USER_ID}
+    )()
+
+    try:
+        with TestClient(app) as client:
+            listed = client.get("/api/v1/ru-ru/products?limit=2")
+            by_id = client.get(f"/api/v1/ru-ru/products/{PRODUCT_ID}")
+            by_slug = client.get("/api/v1/ru-ru/products/by-slug/mediterranean-bowl")
+    finally:
+        app.dependency_overrides.clear()
+
+    expected = [{"id": str(INGREDIENT_ID), "name": "Арахис"}]
+    assert listed.status_code == 200
+    assert listed.json()["items"][0]["user_blacklisted_ingredients_matches"] == expected
+    assert listed.json()["items"][1]["user_blacklisted_ingredients_matches"] == []
+    assert by_id.status_code == 200
+    assert by_id.json()["user_blacklisted_ingredients_matches"] == expected
+    assert by_slug.status_code == 200
+    assert by_slug.json()["user_blacklisted_ingredients_matches"] == expected
+    assert pool.match_requests == 3
 
 
 class PublicSubscriptionListPool:

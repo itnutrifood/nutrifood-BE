@@ -32,6 +32,26 @@ async def get_current_user(
     if credentials is None:
         raise AuthenticationError
 
+    return await _identity_from_credentials(credentials, settings, firebase_service, pool)
+
+
+async def get_optional_current_user(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    firebase_service: FirebaseServiceDependency,
+    pool: DbPool,
+) -> UserIdentity | None:
+    if credentials is None:
+        return None
+    return await _identity_from_credentials(credentials, settings, firebase_service, pool)
+
+
+async def _identity_from_credentials(
+    credentials: HTTPAuthorizationCredentials,
+    settings: Settings,
+    firebase_service: FirebaseServiceDependency,
+    pool: DbPool,
+) -> UserIdentity:
     try:
         claims = await firebase_service.verify_id_token(credentials.credentials)
     except (
@@ -56,6 +76,7 @@ async def get_current_user(
 
 
 RequireAuth = Annotated[UserIdentity, Depends(get_current_user)]
+OptionalAuth = Annotated[UserIdentity | None, Depends(get_optional_current_user)]
 
 
 class RoleChecker:

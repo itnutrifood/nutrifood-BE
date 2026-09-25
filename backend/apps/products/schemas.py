@@ -16,6 +16,7 @@ from pydantic import (
 
 from backend.apps.common.enums import LanguageCode
 from backend.apps.common.pagination import Page
+from backend.apps.ingredients.schemas import PublicIngredientRead
 
 ProductSlug = Annotated[
     str,
@@ -154,6 +155,11 @@ def _validate_unique_category_ids(category_ids: Sequence[UUID]) -> None:
         raise ValueError("category_ids cannot contain duplicates")
 
 
+def _validate_unique_ingredient_ids(ingredient_ids: Sequence[UUID]) -> None:
+    if len(ingredient_ids) != len(set(ingredient_ids)):
+        raise ValueError("ingredient_ids cannot contain duplicates")
+
+
 class ProductCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -162,6 +168,7 @@ class ProductCreate(BaseModel):
     description: LocalizedText
     images: list[ProductImage] = Field(min_length=1, max_length=MAX_PRODUCT_IMAGES)
     category_ids: list[UUID] = Field(default_factory=list, max_length=100)
+    ingredient_ids: list[UUID] = Field(default_factory=list, max_length=100)
     image_tags: LocalizedWords = Field(default_factory=LocalizedWords)
     text_tags: LocalizedWords = Field(default_factory=LocalizedWords)
     serving_size: OptionalLocalizedText = Field(default_factory=OptionalLocalizedText)
@@ -175,6 +182,7 @@ class ProductCreate(BaseModel):
     def validate_unique_values(self) -> Self:
         _validate_unique_image_urls(self.images)
         _validate_unique_category_ids(self.category_ids)
+        _validate_unique_ingredient_ids(self.ingredient_ids)
         return self
 
 
@@ -190,6 +198,7 @@ class ProductUpdate(BaseModel):
         max_length=MAX_PRODUCT_IMAGES,
     )
     category_ids: list[UUID] | None = Field(default=None, max_length=100)
+    ingredient_ids: list[UUID] | None = Field(default=None, max_length=100)
     image_tags: LocalizedWords | None = None
     text_tags: LocalizedWords | None = None
     serving_size: OptionalLocalizedText | None = None
@@ -204,7 +213,14 @@ class ProductUpdate(BaseModel):
         if not self.model_fields_set:
             raise ValueError("At least one field must be provided")
 
-        non_nullable_fields = {"title", "description", "images", "category_ids", "price"}
+        non_nullable_fields = {
+            "title",
+            "description",
+            "images",
+            "category_ids",
+            "ingredient_ids",
+            "price",
+        }
         for field_name in self.model_fields_set.intersection(non_nullable_fields):
             if getattr(self, field_name) is None:
                 raise ValueError(f"{field_name} cannot be null")
@@ -213,6 +229,8 @@ class ProductUpdate(BaseModel):
             _validate_unique_image_urls(self.images)
         if self.category_ids is not None:
             _validate_unique_category_ids(self.category_ids)
+        if self.ingredient_ids is not None:
+            _validate_unique_ingredient_ids(self.ingredient_ids)
 
         return self
 
@@ -224,6 +242,7 @@ class ProductRead(BaseModel):
     description: LocalizedText
     images: list[ProductImage]
     category_ids: list[UUID]
+    ingredient_ids: list[UUID] = Field(default_factory=list)
     image_tags: LocalizedWords
     text_tags: LocalizedWords
     serving_size: OptionalLocalizedText
@@ -247,6 +266,7 @@ class PublicProductRead(BaseModel):
     description: str
     images: list[ProductImage]
     category_ids: list[UUID]
+    user_blacklisted_ingredients_matches: list[PublicIngredientRead] = Field(default_factory=list)
     image_tags: list[str]
     text_tags: list[str]
     serving_size: str | None

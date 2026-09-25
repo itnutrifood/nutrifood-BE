@@ -3,6 +3,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Query
 
+from backend.apps.accounts.dependencies import OptionalAuth
 from backend.apps.common.localization import LocaleFromPath
 from backend.apps.common.pagination import CursorPage
 from backend.apps.products.schemas import ProductSlug, ProductSort, PublicProductRead
@@ -19,6 +20,7 @@ router = APIRouter(prefix="/products", tags=["products"])
 async def list_public_products(
     language: LocaleFromPath,
     pool: DbPool,
+    current_user: OptionalAuth,
     category_id: UUID | None = None,
     search: Annotated[
         str | None,
@@ -36,6 +38,7 @@ async def list_public_products(
         sort=sort,
         limit=limit,
         cursor=cursor,
+        user_id=current_user.id if current_user is not None else None,
     )
 
 
@@ -44,8 +47,11 @@ async def read_public_product_by_slug(
     language: LocaleFromPath,
     slug: ProductSlug,
     pool: DbPool,
+    current_user: OptionalAuth,
 ) -> PublicProductRead:
-    return await get_public_product_by_slug(pool, language, slug)
+    return await get_public_product_by_slug(
+        pool, language, slug, current_user.id if current_user is not None else None
+    )
 
 
 @router.get("/{product_id}", response_model=PublicProductRead)
@@ -53,5 +59,8 @@ async def read_public_product(
     language: LocaleFromPath,
     product_id: UUID,
     pool: DbPool,
+    current_user: OptionalAuth,
 ) -> PublicProductRead:
-    return await get_public_product(pool, language, product_id)
+    return await get_public_product(
+        pool, language, product_id, current_user.id if current_user is not None else None
+    )

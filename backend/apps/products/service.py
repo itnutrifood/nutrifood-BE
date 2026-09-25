@@ -19,6 +19,7 @@ from backend.apps.common.pagination import (
     decode_cursor,
     encode_cursor,
 )
+from backend.apps.ingredients.schemas import PublicIngredientRead
 from backend.apps.products import repository
 from backend.apps.products.exceptions import ProductNotFoundError
 from backend.apps.products.schemas import ProductRead, ProductSort, PublicProductRead
@@ -232,6 +233,7 @@ async def list_public_products(
     cursor: str | None,
     search: str | None,
     sort: ProductSort | None = None,
+    user_id: UUID | None = None,
 ) -> CursorPage[PublicProductRead]:
     normalized_search = " ".join(search.split()) if search is not None else None
 
@@ -267,7 +269,7 @@ async def list_public_products(
             else None
         )
         return CursorPage(
-            items=[to_public_product(product, language) for product in products[:limit]],
+            items=await _public_products_with_matches(pool, products[:limit], language, user_id),
             limit=limit,
             next_cursor=next_cursor,
         )
@@ -296,7 +298,9 @@ async def list_public_products(
             else None
         )
         return CursorPage(
-            items=[to_public_product(result.product, language) for result in results[:limit]],
+            items=await _public_products_with_matches(
+                pool, [result.product for result in results[:limit]], language, user_id
+            ),
             limit=limit,
             next_cursor=next_cursor,
         )
@@ -314,7 +318,7 @@ async def list_public_products(
     next_cursor = _product_cursor(products[limit - 1]) if len(products) > limit else None
 
     return CursorPage(
-        items=[to_public_product(product, language) for product in products[:limit]],
+        items=await _public_products_with_matches(pool, products[:limit], language, user_id),
         limit=limit,
         next_cursor=next_cursor,
     )
@@ -324,21 +328,51 @@ async def get_public_product(
     pool: asyncpg.Pool,
     language: LanguageCode,
     product_id: UUID,
+    user_id: UUID | None = None,
 ) -> PublicProductRead:
     product = await repository.get_public_product(pool, product_id)
-    return to_public_product(product, language)
+    return (await _public_products_with_matches(pool, [product], language, user_id))[0]
 
 
 async def get_public_product_by_slug(
     pool: asyncpg.Pool,
     language: LanguageCode,
     slug: str,
+    user_id: UUID | None = None,
 ) -> PublicProductRead:
     product = await repository.get_public_product_by_slug(pool, slug)
-    return to_public_product(product, language)
+    return (await _public_products_with_matches(pool, [product], language, user_id))[0]
 
 
-def to_public_product(product: ProductRead, language: LanguageCode) -> PublicProductRead:
+async def _public_products_with_matches(
+    pool: asyncpg.Pool,
+    products: list[ProductRead],
+    language: LanguageCode,
+    user_id: UUID | None,
+) -> list[PublicProductRead]:
+    matches: dict[UUID, list[tuple[UUID, str]]] = {}
+    if user_id is not None and products:
+        matches = await repository.blacklisted_ingredient_matches(
+            pool, [product.id for product in products], user_id, language
+        )
+    return [
+        to_public_product(
+            product,
+            language,
+            [
+                PublicIngredientRead(id=ingredient_id, name=name)
+                for ingredient_id, name in matches.get(product.id, [])
+            ],
+        )
+        for product in products
+    ]
+
+
+def to_public_product(
+    product: ProductRead,
+    language: LanguageCode,
+    matches: list[PublicIngredientRead] | None = None,
+) -> PublicProductRead:
     return PublicProductRead(
         id=product.id,
         slug=product.slug,
@@ -346,6 +380,7 @@ def to_public_product(product: ProductRead, language: LanguageCode) -> PublicPro
         description=required_localized_text(product.description.to_db(), language),
         images=product.images,
         category_ids=product.category_ids,
+        user_blacklisted_ingredients_matches=matches or [],
         image_tags=localized_items(product.image_tags.to_db(), language),
         text_tags=localized_items(product.text_tags.to_db(), language),
         serving_size=localized_text(product.serving_size.to_db(), language),
