@@ -1,87 +1,280 @@
+from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
 import pytest
+from backend.apps.common.enums import LanguageCode
+from backend.apps.common.localization import resolve_email_language
+from backend.apps.notifications.email_templates.order_confirmation import render_order_confirmation
 from backend.apps.orders import tasks
+from backend.apps.orders.exceptions import OrderNotFoundError
+from backend.apps.orders.schemas import OrderRead
+from backend.apps.products.schemas import LocalizedText
 from backend.config.email import EmailService
 from backend.config.settings import Settings
+from fastapi import HTTPException
 
 ORDER_ID = UUID("70000000-0000-0000-0000-000000000001")
 
 
-class EmailTaskPool:
-    def __init__(self, recipient: str | None) -> None:
-        self.recipient = recipient
-        self.closed = False
-        self.query: str | None = None
-        self.args: tuple[object, ...] | None = None
+def sample_order() -> OrderRead:
+    return OrderRead.model_validate(
+        {
+            "id": ORDER_ID,
+            "order_number": "NFUX6Q8N6LD",
+            "user_id": UUID("60000000-0000-0000-0000-000000000001"),
+            "status": "pending",
+            "payment_method": "cash_on_delivery",
+            "payment_status": "unpaid",
+            "subtotal": Decimal("25.98"),
+            "delivery_fee": Decimal("2.00"),
+            "total": Decimal("27.98"),
+            "currency": "USD",
+            "customer_first_name": "Jane",
+            "customer_last_name": "Doe",
+            "customer_email": "jane@example.com",
+            "contact_phone": "+37499123456",
+            "requested_delivery_at": datetime(2026, 9, 25, 10, 0, tzinfo=UTC),
+            "created_at": datetime(2026, 9, 25, 8, 0, tzinfo=UTC),
+            "updated_at": datetime(2026, 9, 25, 8, 0, tzinfo=UTC),
+            "delivery_address": {
+                "country": "Armenia",
+                "region": "Yerevan",
+                "city": "Yerevan",
+                "street": "Northern Avenue",
+                "building_number": "10/1",
+                "entrance": "2",
+                "floor": "5",
+                "apartment": "17",
+                "formatted_address": "Armenia, Yerevan, Northern Avenue, 10/1",
+                "location": None,
+                "location_source": "yandex",
+            },
+            "delivery_notes": "Call on arrival",
+            "items": [
+                {
+                    "id": UUID("71000000-0000-0000-0000-000000000001"),
+                    "product_id": UUID("72000000-0000-0000-0000-000000000001"),
+                    "product_slug": "mediterranean-bowl",
+                    "product_title": {
+                        "EN-US": "Mediterranean Bowl",
+                        "HY-AM": "Միջերկրածովյան բոուլ",
+                        "RU-RU": "Средиземноморский боул",
+                    },
+                    "unit_price": Decimal("12.99"),
+                    "quantity": 2,
+                    "line_total": Decimal("25.98"),
+                }
+            ],
+        }
+    )
 
-    async def fetchrow(self, query: str, *args: object) -> dict[str, str] | None:
-        self.query = query
-        self.args = args
-        if self.recipient is None:
-            return None
-        return {"customer_email": self.recipient}
+
+class EmailTaskPool:
+    def __init__(self) -> None:
+        self.closed = False
 
     async def close(self) -> None:
         self.closed = True
 
 
 @pytest.mark.asyncio
-async def test_order_preparing_email_is_sent_to_opted_in_customer(
+async def test_order_confirmation_email_contains_saved_order_details(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    pool = EmailTaskPool("jane@example.com")
+    pool = EmailTaskPool()
+    order = sample_order()
     sent: dict[str, Any] = {}
 
     async def create_task_pool() -> EmailTaskPool:
         return pool
+
+    async def get_order(task_pool: object, order_id: UUID) -> OrderRead:
+        assert task_pool is pool
+        assert order_id == ORDER_ID
+        return order
 
     async def fake_send_email(service: EmailService, **message: Any) -> int:
         sent.update(message)
         return 202
 
     monkeypatch.setattr(tasks, "create_pool", create_task_pool)
+    monkeypatch.setattr(tasks.repository, "get_admin_order", get_order)
     monkeypatch.setattr(
         tasks,
         "get_settings",
-        lambda: Settings(
-            _env_file=None,
-            sendgrid_api_key="sendgrid-api-key",
-        ),
+        lambda: Settings(_env_file=None, sendgrid_api_key="sendgrid-api-key"),
     )
     monkeypatch.setattr(EmailService, "send_email", fake_send_email)
 
-    delivered = await tasks._send_order_preparing_email(ORDER_ID)
-
-    assert delivered is True
+    assert await tasks._send_order_preparing_email(ORDER_ID) is True
     assert pool.closed is True
-    assert pool.args == (ORDER_ID,)
-    assert pool.query is not None and "np.order_confirmations" in pool.query
-    assert sent == {
-        "from_email": "info@nutrifood.am",
-        "to_emails": "jane@example.com",
-        "subject": tasks.ORDER_PREPARING_EMAIL_SUBJECT,
-        "plain_text_content": "Your order is being prepared for delivery.",
-    }
+    assert sent["from_email"] == "info@nutrifood.am"
+    assert sent["to_emails"] == "jane@example.com"
+    assert sent["subject"] == "NutriFood order #NFUX6Q8N6LD received"
+    for value in (
+        "NFUX6Q8N6LD",
+        str(ORDER_ID),
+        "Mediterranean Bowl",
+        "2 × 12.99 USD",
+        "25.98 USD",
+        "2.00 USD",
+        "27.98 USD",
+        "Northern Avenue",
+        "+37499123456",
+        "25 September 2026, 14:00 (Armenia time)",
+        "Cash on delivery",
+        "Call on arrival",
+    ):
+        assert value in sent["plain_text_content"]
+        assert value in sent["html_content"]
+
+
+def test_order_email_escapes_customer_and_catalog_content() -> None:
+    order = sample_order()
+    title = LocalizedText.model_validate(
+        {"EN-US": "Bowl <script>", "HY-AM": "Բոուլ", "RU-RU": "Боул"}
+    )
+    order = order.model_copy(
+        update={
+            "customer_first_name": "Jane & Co",
+            "delivery_notes": "Leave at <door>",
+            "items": [order.items[0].model_copy(update={"product_title": title})],
+        }
+    )
+
+    email = render_order_confirmation(order)
+
+    assert "Jane &amp; Co" in email.html
+    assert "Bowl &lt;script&gt;" in email.html
+    assert "Leave at &lt;door&gt;" in email.html
+    assert "Bowl <script>" in email.plain_text
+
+
+@pytest.mark.parametrize(
+    ("language", "tag", "heading", "title", "month", "subject"),
+    [
+        (
+            LanguageCode.EN_US,
+            "en",
+            "Thanks for your order!",
+            "Mediterranean Bowl",
+            "September",
+            "NutriFood order #NFUX6Q8N6LD received",
+        ),
+        (
+            LanguageCode.HY_AM,
+            "hy",
+            "Շնորհակալություն պատվերի համար։",
+            "Միջերկրածովյան բոուլ",
+            "սեպտեմբերի",
+            "Ձեր NutriFood #NFUX6Q8N6LD պատվերն ընդունվել է",
+        ),
+        (
+            LanguageCode.RU_RU,
+            "ru",
+            "Спасибо за заказ!",
+            "Средиземноморский боул",
+            "сентября",
+            "Заказ NutriFood №NFUX6Q8N6LD принят",
+        ),
+    ],
+)
+def test_order_email_uses_selected_language_for_all_content(
+    language: LanguageCode,
+    tag: str,
+    heading: str,
+    title: str,
+    month: str,
+    subject: str,
+) -> None:
+    email = render_order_confirmation(sample_order(), language)
+
+    assert f'<html lang="{tag}">' in email.html
+    for value in (heading, title, month):
+        assert value in email.html
+        assert value in email.plain_text
+    assert email.subject == subject
+    if language != LanguageCode.EN_US:
+        assert "Mediterranean Bowl" not in email.html
+
+
+@pytest.mark.parametrize(
+    ("selected", "accepted", "expected"),
+    [
+        ("hy", "ru-RU, en;q=0.8", LanguageCode.HY_AM),
+        ("ru-RU", None, LanguageCode.RU_RU),
+        (None, "ru-RU, hy;q=0.8", LanguageCode.RU_RU),
+        (None, "fr, hy;q=0.7, en;q=0.3", LanguageCode.HY_AM),
+        (None, None, LanguageCode.EN_US),
+    ],
+)
+def test_email_language_selection(
+    selected: str | None,
+    accepted: str | None,
+    expected: LanguageCode,
+) -> None:
+    assert resolve_email_language(selected, accepted) == expected
+
+
+def test_email_language_rejects_unsupported_explicit_locale() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        resolve_email_language("fr", None)
+
+    assert exc_info.value.status_code == 422
+
+
+def test_order_email_lists_all_items_and_omits_optional_delivery_details() -> None:
+    order = sample_order()
+    title = LocalizedText.model_validate(
+        {"EN-US": "Green Salad", "HY-AM": "Աղցան", "RU-RU": "Салат"}
+    )
+    second_item = order.items[0].model_copy(
+        update={
+            "product_title": title,
+            "quantity": 1,
+            "unit_price": Decimal("8.50"),
+            "line_total": Decimal("8.50"),
+        }
+    )
+    order = order.model_copy(
+        update={
+            "items": [order.items[0], second_item],
+            "subtotal": Decimal("34.48"),
+            "total": Decimal("36.48"),
+            "requested_delivery_at": None,
+            "delivery_notes": None,
+        }
+    )
+
+    email = render_order_confirmation(order)
+
+    assert "Mediterranean Bowl" in email.html
+    assert "Green Salad" in email.html
+    assert "Green Salad" in email.plain_text
+    assert "Requested delivery" not in email.html
+    assert "Delivery notes" not in email.html
 
 
 @pytest.mark.asyncio
-async def test_order_preparing_email_is_skipped_when_customer_opted_out(
+async def test_order_confirmation_email_skips_missing_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    pool = EmailTaskPool(None)
+    pool = EmailTaskPool()
 
     async def create_task_pool() -> EmailTaskPool:
         return pool
+
+    async def get_order(task_pool: object, order_id: UUID) -> OrderRead:
+        raise OrderNotFoundError
 
     async def unexpected_send_email(service: EmailService, **message: Any) -> int:
         raise AssertionError("Email must not be sent")
 
     monkeypatch.setattr(tasks, "create_pool", create_task_pool)
+    monkeypatch.setattr(tasks.repository, "get_admin_order", get_order)
     monkeypatch.setattr(EmailService, "send_email", unexpected_send_email)
 
-    delivered = await tasks._send_order_preparing_email(ORDER_ID)
-
-    assert delivered is False
+    assert await tasks._send_order_preparing_email(ORDER_ID) is False
     assert pool.closed is True

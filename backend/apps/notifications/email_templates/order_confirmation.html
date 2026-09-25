@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="${language}">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${subject}</title></head>
+<body style="margin:0;padding:0;background:#f7fbf5;color:#0a0a0a;font-family:Arial,Helvetica,sans-serif">
+<div style="display:none;font-size:1px;line-height:1px;color:#f7fbf5;max-height:0;max-width:0;opacity:0;overflow:hidden">
+${preheader}
+</div>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#f7fbf5">
+<tr><td align="center" style="padding:32px 16px">
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" style="width:100%;max-width:600px;background:#fff;border:1px solid #e5e7eb;border-radius:16px">
+<tr><td style="padding:24px 32px;border-bottom:1px solid #e5e7eb">
+<span style="font-size:23px;font-weight:700;letter-spacing:-1px;color:#1a6553">nutri</span><span style="font-size:23px;font-weight:700;letter-spacing:-1px;color:#56973b">Food</span>
+</td></tr>
+<tr><td style="padding:32px 32px 24px">
+<span style="display:inline-block;padding:7px 12px;border-radius:20px;background:#f0f7ed;color:#1a6553;font-size:12px;font-weight:700;letter-spacing:.4px">${badge}</span>
+<h1 style="margin:18px 0 12px;color:#1a6553;font-size:28px;line-height:36px">${heading}</h1>
+<p style="margin:0;color:#4a5565;font-size:15px;line-height:24px">${greeting} ${intro}</p>
+</td></tr>
+<tr><td style="padding:0 32px 24px">
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#f7fbf5;border-radius:12px">
+<tr><td style="padding:16px 18px;font-size:13px;color:#4a5565">${order_number_label}<br><strong style="display:block;margin-top:6px;color:#1a6553;font-size:17px">#${number}</strong></td>
+<td align="right" style="padding:16px 18px;font-size:13px;color:#4a5565">${placed_label}<br><strong style="display:block;margin-top:6px;color:#0a0a0a;font-size:13px">${placed_at}</strong></td></tr>
+<tr><td colspan="2" style="padding:0 18px 16px;color:#6a7282;font-size:11px;overflow-wrap:anywhere">${order_id_label}: ${order_id}</td></tr>
+</table></td></tr>
+<tr><td style="padding:0 32px 28px">
+<h2 style="margin:0 0 8px;color:#1a6553;font-size:18px">${items_label}</h2>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="font-size:14px">${rows}</table>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-top:18px;font-size:14px">
+<tr><td style="padding:5px 0;color:#4a5565">${subtotal_label}</td><td align="right">${subtotal}</td></tr>
+<tr><td style="padding:5px 0;color:#4a5565">${delivery_label}</td><td align="right">${delivery_fee}</td></tr>
+<tr><td style="padding:16px 0 0;border-top:1px solid #e5e7eb;color:#1a6553;font-size:18px;font-weight:700">${total_label}</td>
+<td align="right" style="padding:16px 0 0;border-top:1px solid #e5e7eb;color:#1a6553;font-size:18px;font-weight:700">${total}</td></tr>
+</table></td></tr>
+<tr><td style="padding:24px 32px;background:#f0f7ed">
+<h2 style="margin:0 0 14px;color:#1a6553;font-size:18px">${delivery_payment_label}</h2>
+<p style="margin:0 0 12px;color:#0a0a0a;font-size:14px;line-height:22px"><strong>${deliver_to_label}</strong><br>${address}<br>${contact_phone_label}: ${phone}</p>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="font-size:14px">${delivery_html}
+<tr><td style="padding:5px 0;color:#4a5565">${payment_label}</td><td align="right" style="padding:5px 0;color:#0a0a0a">${payment}</td></tr></table>${notes_html}
+</td></tr>
+<tr><td style="padding:28px 32px 32px">
+<p style="margin:0;color:#4a5565;font-size:14px;line-height:22px">${contact_help} <a href="mailto:info@nutrifood.am" style="color:#1a6553">info@nutrifood.am</a>.</p>
+</td></tr></table>
+<p style="margin:20px 0 0;color:#6a7282;font-size:12px">NutriFood · ${tagline}</p>
+</td></tr></table>
+</body></html>

@@ -272,24 +272,3 @@ async def update_order_status(
         ),
     )
     return order_from_records(order_row, item_rows)
-
-
-async def get_order_confirmation_recipient(
-    pool: asyncpg.Pool,
-    order_id: UUID,
-) -> str | None:
-    record = cast(
-        Mapping[str, object] | None,
-        await pool.fetchrow(
-            """
-            SELECT o.customer_email
-            FROM orders AS o
-            INNER JOIN user_notification_preferences AS np ON np.user_id = o.user_id
-            WHERE o.id = $1 AND np.order_confirmations
-            """,
-            order_id,
-        ),
-    )
-    if record is None:
-        return None
-    return cast(str, record["customer_email"])

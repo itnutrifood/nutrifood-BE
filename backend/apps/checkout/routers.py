@@ -5,6 +5,7 @@ from fastapi import status as http_status
 
 from backend.apps.accounts.dependencies import RequireAuth
 from backend.apps.checkout.service import place_order
+from backend.apps.common.localization import resolve_email_language
 from backend.apps.orders.schemas import OrderRead, PlaceOrderRequest
 from backend.config.database import DbPool
 from backend.config.settings import Settings, get_settings
@@ -27,6 +28,11 @@ async def place_cart_order(
         ),
     ],
     settings: Annotated[Settings, Depends(get_settings)],
+    selected_locale: Annotated[
+        str | None,
+        Header(alias="X-Locale", description="Selected site language: hy, en, or ru"),
+    ] = None,
+    accept_language: Annotated[str | None, Header(alias="Accept-Language")] = None,
 ) -> OrderRead:
     return await place_order(
         pool,
@@ -34,4 +40,5 @@ async def place_cart_order(
         payload,
         idempotency_key,
         settings.catalog_currency,
+        resolve_email_language(selected_locale, accept_language),
     )

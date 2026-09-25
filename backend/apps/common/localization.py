@@ -22,6 +22,49 @@ def get_locale_from_path(
 LocaleFromPath = Annotated[LanguageCode, Depends(get_locale_from_path)]
 
 
+def _email_language_tag(tag: str) -> LanguageCode | None:
+    base = tag.strip().lower().replace("_", "-").split("-", 1)[0]
+    return {
+        "hy": LanguageCode.HY_AM,
+        "en": LanguageCode.EN_US,
+        "ru": LanguageCode.RU_RU,
+    }.get(base)
+
+
+def resolve_email_language(
+    selected_locale: str | None,
+    accept_language: str | None,
+) -> LanguageCode:
+    """Use the selected site locale, then the best supported Accept-Language value."""
+    if selected_locale is not None:
+        selected = _email_language_tag(selected_locale)
+        if selected is None:
+            raise HTTPException(
+                status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Unsupported email locale",
+            )
+        return selected
+
+    best_language = LanguageCode.EN_US
+    best_quality = 0.0
+    for preference in (accept_language or "").split(","):
+        tag, *parameters = preference.split(";")
+        language = _email_language_tag(tag)
+        if language is None:
+            continue
+        quality = 1.0
+        for parameter in parameters:
+            if parameter.strip().lower().startswith("q="):
+                try:
+                    quality = float(parameter.strip()[2:])
+                except ValueError:
+                    quality = 0.0
+        if 0 < quality <= 1 and quality > best_quality:
+            best_language = language
+            best_quality = quality
+    return best_language
+
+
 def localized_text(
     values: Mapping[str, str],
     language: LanguageCode,

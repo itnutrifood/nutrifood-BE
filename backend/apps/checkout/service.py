@@ -6,6 +6,7 @@ from uuid import UUID
 import asyncpg
 
 from backend.apps.checkout import repository
+from backend.apps.common.enums import LanguageCode
 from backend.apps.orders.schemas import OrderRead, PlaceOrderRequest
 from backend.apps.orders.tasks import send_order_preparing_email
 
@@ -28,6 +29,7 @@ async def place_order(
     payload: PlaceOrderRequest,
     idempotency_key: str,
     currency: str,
+    language: LanguageCode,
 ) -> OrderRead:
     result = await repository.place_order(
         pool,
@@ -39,7 +41,7 @@ async def place_order(
     )
     if result.created:
         try:
-            send_order_preparing_email.delay(str(result.order.id))
+            send_order_preparing_email.delay(str(result.order.id), language.value)
         except Exception:
             logger.exception(
                 "Could not enqueue order preparation email order_id=%s",

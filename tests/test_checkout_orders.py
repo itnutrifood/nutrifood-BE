@@ -294,7 +294,7 @@ def configure_test_app(
     *,
     authenticated: bool = True,
     admin_authenticated: bool = False,
-    enqueued_email_order_ids: list[UUID] | None = None,
+    enqueued_email_order_ids: list[tuple[UUID, str]] | None = None,
 ) -> Any:
     from backend.config import database
     from backend.config.asgi import app
@@ -303,8 +303,8 @@ def configure_test_app(
     monkeypatch.setattr(
         checkout_service.send_order_preparing_email,
         "delay",
-        lambda order_id: (
-            enqueued_email_order_ids.append(UUID(order_id))
+        lambda order_id, language: (
+            enqueued_email_order_ids.append((UUID(order_id), language))
             if enqueued_email_order_ids is not None
             else None
         ),
@@ -339,7 +339,7 @@ def test_place_order_snapshots_server_totals_clears_cart_and_replays_safely(
     monkeypatch: Any,
 ) -> None:
     pool = CheckoutPool()
-    enqueued_email_order_ids: list[UUID] = []
+    enqueued_email_order_ids: list[tuple[UUID, str]] = []
     app = configure_test_app(
         monkeypatch,
         pool,
@@ -350,7 +350,7 @@ def test_place_order_snapshots_server_totals_clears_cart_and_replays_safely(
         with TestClient(app) as client:
             first_response = client.post(
                 "/api/v1/checkout/orders",
-                headers={"Idempotency-Key": "checkout-attempt-1"},
+                headers={"Idempotency-Key": "checkout-attempt-1", "X-Locale": "hy"},
                 json=place_order_payload(),
             )
             replay_response = client.post(
@@ -381,7 +381,33 @@ def test_place_order_snapshots_server_totals_clears_cart_and_replays_safely(
     assert pool.cart_read_count == 1
     assert pool.deleted_product_ids == [PRODUCT_ID]
     assert pool.advisory_lock_count == 2
-    assert enqueued_email_order_ids == [ORDER_ID]
+    assert enqueued_email_order_ids == [(ORDER_ID, "HY-AM")]
+
+
+def test_checkout_uses_accept_language_for_order_email(monkeypatch: Any) -> None:
+    pool = CheckoutPool()
+    enqueued_email_order_ids: list[tuple[UUID, str]] = []
+    app = configure_test_app(
+        monkeypatch,
+        pool,
+        enqueued_email_order_ids=enqueued_email_order_ids,
+    )
+
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/checkout/orders",
+                headers={
+                    "Idempotency-Key": "checkout-attempt-1",
+                    "Accept-Language": "ru-RU, en;q=0.8",
+                },
+                json=place_order_payload(),
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 201
+    assert enqueued_email_order_ids == [(ORDER_ID, "RU-RU")]
 
 
 def test_place_order_rejects_requested_delivery_at_without_timezone(monkeypatch: Any) -> None:
